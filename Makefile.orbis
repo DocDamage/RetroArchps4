@@ -10,6 +10,8 @@ ORBIS_ENABLE_MENU_WIDGETS  ?= 1
 ORBIS_ENABLE_7ZIP          ?= 1
 ORBIS_ENABLE_CHEEVOS       ?= 1
 ORBIS_ENABLE_OVERLAY       ?= 1
+ORBIS_ENABLE_KEYBOARD      ?= 0
+ORBIS_ENABLE_MOUSE         ?= 0
 ORBIS_MENU_DRIVER          ?= xmb
 
 ifeq ($(ORBIS_BUILD_PROFILE),lite)
@@ -92,12 +94,22 @@ else
 ORBIS_PLATFORM_INCLUDE_ROOT := $(ORBIS_INCLUDE_ROOT)
 endif
 
+ifneq ($(wildcard $(ORBIS_INCLUDE_ROOT)/c++/v1),)
+ORBIS_CXX_INCLUDE_ROOT := $(ORBIS_INCLUDE_ROOT)/c++/v1
+else ifneq ($(wildcard $(ORBISDEV)/usr/include/c++/v1),)
+ORBIS_CXX_INCLUDE_ROOT := $(ORBISDEV)/usr/include/c++/v1
+endif
+
 ifneq ($(wildcard $(ORBIS_LIB_ROOT)/crt0.o),)
 CRTFILE ?= $(ORBIS_LIB_ROOT)/crt0.o
 else ifneq ($(wildcard $(ORBISDEV)/crt0.s),)
 CRTFILE ?= $(ORBISDEV)/crt0.s
 else
 CRTFILE ?= $(ORBIS_LIB_ROOT)/crt0.o
+endif
+
+ifneq ($(wildcard $(ORBIS_LIB_ROOT)/linker.x),)
+ORBIS_LINKER_SCRIPT := $(ORBIS_LIB_ROOT)/linker.x
 endif
 
 export PATH := $(PATH):$(ORBISDEV)/bin
@@ -114,23 +126,30 @@ NM      := $(PREFIX)nm
 LD      := $(CXX)
 
 INCDIRS := -I. -Ideps/libz -Ideps/7zip -Ilibretro-common/include -Ideps/stb -Ilibretro-common/include/compat/zlib
+ifneq ($(strip $(ORBIS_CXX_INCLUDE_ROOT)),)
+INCDIRS += -I$(ORBIS_CXX_INCLUDE_ROOT)
+endif
 LIBDIRS := -L.
 
-ARCHFLAGS := -m64 -DORBIS
+ARCHFLAGS := -m64 -DORBIS -D__ORBIS__ -D__PS4__ -D_BSD_SOURCE
 CFLAGS    += $(ARCHFLAGS) -std=c11 -mcmodel=large -ffreestanding -nostdlib -nostdinc -fno-builtin -fno-stack-protector -ffunction-sections -fdata-sections
 
 ifeq ($(DEBUG), 1)
    CFLAGS += -O2 -g
 else
-   CFLAGS += -O3
+   CFLAGS += -O3 -DNDEBUG -fomit-frame-pointer
 endif
 
 ASFLAGS := $(ARCHFLAGS) -I$(ORBIS_INCLUDE_ROOT) -target x86_64-scei-ps4-elf -fPIE
 LDFLAGS := -O3 -Wall -m64 -nostartfiles -nostdlib -L$(ORBIS_LIB_ROOT) -pie -Wl,--gc-sections
+ifneq ($(strip $(ORBIS_LINKER_SCRIPT)),)
+LDFLAGS += -Wl,-z -Wl,max-page-size=0x4000 -Wl,--eh-frame-hdr -Wl,--dynamic-linker="/libexec/ld-elf.so.1" -T $(ORBIS_LINKER_SCRIPT)
+endif
 ARFLAGS := rcs
+STRIP_FLAGS ?= --strip-unneeded
 
 CFLAGS += -Wall -pedantic -Wno-zero-length-array -Wno-format-pedantic
-CFLAGS += -D__PS4__ -I$(ORBIS_INCLUDE_ROOT) -I$(ORBIS_PLATFORM_INCLUDE_ROOT)
+CFLAGS += -I$(ORBIS_INCLUDE_ROOT) -I$(ORBIS_PLATFORM_INCLUDE_ROOT)
 CFLAGS += -target x86_64-scei-ps4-elf -fPIE
 CFLAGS += -DRARCH_INTERNAL -DRARCH_CONSOLE
 CFLAGS += -DHAVE_FILTERS_BUILTIN $(DEFINES)
@@ -215,6 +234,16 @@ CXXFLAGS := $(CFLAGS)
 PS4_LIBS := -lorbisFile -lelfloader -lorbisKeyboard -lorbis2d -lpng -lz -lorbisGl -lorbisPad -lorbisAudio -lmod -lorbisFileBrowser -lorbisXbmFont -lSceNet_stub -lScePigletv2VSH_stub -lSceSystemService_stub -lSceUserService_stub -lScePad_stub -lSceAudioOut_stub -lSceIme_stub -lSceSysmodule_stub \
 	-lPs4_extension_kernel_call_standard -lPs4_extension_kernel_execute_dynlib_prepare_dlclose -lPs4_common_kernel -lPs4_common_user -lPs4_common_generic -lPs4LibCInternalAdaptive_stub -lPs4LibKernelAdaptive_stub -lSceLibcInternal_stub -lkernel_stub -lps4Kernel_stub -lPs4_base_stub_resolve_minimal -lPs4_base_kernel_dlsym_standard -lPs4_base_kernel_seek_elf_address_standard -lPs4_base_assembler_register_parameter_standard -lPs4_base_assembler_system_call_standard
 
+ifeq ($(ORBIS_ENABLE_KEYBOARD),1)
+   CFLAGS += -DHAVE_KEYBOARD
+   PS4_LIBS += -lSceDbgKeyboard_stub
+endif
+
+ifeq ($(ORBIS_ENABLE_MOUSE),1)
+   CFLAGS += -DHAVE_MOUSE
+   PS4_LIBS += -lSceMouse_stub
+endif
+
 ifeq ($(ORBIS_ENABLE_PS4LINK),1)
    CFLAGS += -DHAVE_PS4LINK
    PS4_LIBS += -lps4link
@@ -228,6 +257,7 @@ endif
 LIBS	:= $(WHOLE_START) -lretro_orbis $(WHOLE_END) $(PS4_LIBS)
 
 TARGETS := $(TARGET).elf
+STRIPPED_TARGET := $(TARGET).stripped.elf
 
 DEPFLAGS    = -MT $@ -MMD -MP -MF $*.Tdepend
 POSTCOMPILE = mv -f $*.Tdepend $*.depend
@@ -245,21 +275,34 @@ full:
 lite:
 	$(MAKE) --no-print-directory all ORBIS_BUILD_PROFILE=lite
 
+stripped: $(STRIPPED_TARGET)
+
+full-stripped:
+	$(MAKE) --no-print-directory stripped ORBIS_BUILD_PROFILE=full
+
+lite-stripped:
+	$(MAKE) --no-print-directory stripped ORBIS_BUILD_PROFILE=lite
+
 help:
 	@echo "Orbis build profiles:"
-	@echo "  make -f Makefile.orbis dev   # debug-oriented build with ps4link/debugnet"
-	@echo "  make -f Makefile.orbis full  # release build with current feature set"
-	@echo "  make -f Makefile.orbis lite  # lean release build with rgui and optional extras off"
+	@echo "  make -f Makefile.orbis dev            # debug-oriented build with ps4link/debugnet"
+	@echo "  make -f Makefile.orbis full           # release build with current feature set"
+	@echo "  make -f Makefile.orbis lite           # lean release build with rgui and optional extras off"
+	@echo "  make -f Makefile.orbis full-stripped  # stripped full release artifact"
+	@echo "  make -f Makefile.orbis lite-stripped  # stripped lean release artifact"
 	@echo ""
-	@echo "Override knobs: ORBIS_ENABLE_PS4LINK, ORBIS_ENABLE_DEBUGNET, ORBIS_ENABLE_MENU_WIDGETS, ORBIS_ENABLE_7ZIP, ORBIS_ENABLE_CHEEVOS, ORBIS_ENABLE_OVERLAY, ORBIS_MENU_DRIVER"
+	@echo "Override knobs: ORBIS_ENABLE_PS4LINK, ORBIS_ENABLE_DEBUGNET, ORBIS_ENABLE_MENU_WIDGETS, ORBIS_ENABLE_7ZIP, ORBIS_ENABLE_CHEEVOS, ORBIS_ENABLE_OVERLAY, ORBIS_ENABLE_KEYBOARD, ORBIS_ENABLE_MOUSE, ORBIS_MENU_DRIVER"
 
 info:
 	@echo "ORBIS_BUILD_PROFILE=$(ORBIS_BUILD_PROFILE)"
 	@echo "ORBIS_TOOLCHAIN_LAYOUT=$(ORBIS_TOOLCHAIN_LAYOUT)"
 	@echo "ORBIS_INCLUDE_ROOT=$(ORBIS_INCLUDE_ROOT)"
 	@echo "ORBIS_PLATFORM_INCLUDE_ROOT=$(ORBIS_PLATFORM_INCLUDE_ROOT)"
+	@echo "ORBIS_CXX_INCLUDE_ROOT=$(ORBIS_CXX_INCLUDE_ROOT)"
 	@echo "ORBIS_LIB_ROOT=$(ORBIS_LIB_ROOT)"
+	@echo "ORBIS_LINKER_SCRIPT=$(ORBIS_LINKER_SCRIPT)"
 	@echo "CRTFILE=$(CRTFILE)"
+	@echo "STRIP_FLAGS=$(STRIP_FLAGS)"
 	@echo "DEBUG=$(DEBUG)"
 	@echo "ORBIS_MENU_DRIVER=$(ORBIS_MENU_DRIVER)"
 	@echo "ORBIS_ENABLE_PS4LINK=$(ORBIS_ENABLE_PS4LINK)"
@@ -268,6 +311,11 @@ info:
 	@echo "ORBIS_ENABLE_7ZIP=$(ORBIS_ENABLE_7ZIP)"
 	@echo "ORBIS_ENABLE_CHEEVOS=$(ORBIS_ENABLE_CHEEVOS)"
 	@echo "ORBIS_ENABLE_OVERLAY=$(ORBIS_ENABLE_OVERLAY)"
+	@echo "ORBIS_ENABLE_KEYBOARD=$(ORBIS_ENABLE_KEYBOARD)"
+	@echo "ORBIS_ENABLE_MOUSE=$(ORBIS_ENABLE_MOUSE)"
+
+size:
+	@ls -lh $(TARGET).elf $(STRIPPED_TARGET) 2>/dev/null || ls -lh $(TARGET).elf 2>/dev/null || true
 
 %.o: %.cpp
 %.o: %.cpp %.depend
@@ -294,11 +342,15 @@ info:
 $(TARGET).elf: $(OBJ) libretro_orbis.a
 	$(LD) $(CRTFILE) $(OBJ) $(LDFLAGS) $(LIBDIRS) $(LIBS) -o $@
 
+$(STRIPPED_TARGET): $(TARGET).elf
+	cp $< $@
+	$(STRIP) $(STRIP_FLAGS) $@
+
 clean:
-	rm -f $(OBJ) $(TARGET).elf
+	rm -f $(OBJ) $(TARGET).elf $(STRIPPED_TARGET)
 	rm -f $(OBJ:.o=.depend)
 
-.PHONY: clean all dev full lite help info
+.PHONY: clean all dev full lite stripped full-stripped lite-stripped help info size
 .PRECIOUS: %.depend
 
 -include $(OBJ:.o=.depend)
