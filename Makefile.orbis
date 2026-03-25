@@ -3,10 +3,43 @@ DEBUG               ?= 0
 GRIFFIN_BUILD        = 0
 WHOLE_ARCHIVE_LINK   = 0
 
-ORBIS_ENABLE_PS4LINK      ?= 1
-ORBIS_ENABLE_DEBUGNET     ?= 1
-ORBIS_ENABLE_MENU_WIDGETS ?= 1
-ORBIS_MENU_DRIVER         ?= xmb
+ORBIS_BUILD_PROFILE        ?= custom
+ORBIS_ENABLE_PS4LINK       ?= 1
+ORBIS_ENABLE_DEBUGNET      ?= 1
+ORBIS_ENABLE_MENU_WIDGETS  ?= 1
+ORBIS_ENABLE_7ZIP          ?= 1
+ORBIS_ENABLE_CHEEVOS       ?= 1
+ORBIS_ENABLE_OVERLAY       ?= 1
+ORBIS_MENU_DRIVER          ?= xmb
+
+ifeq ($(ORBIS_BUILD_PROFILE),lite)
+ORBIS_ENABLE_PS4LINK      := 0
+ORBIS_ENABLE_DEBUGNET     := 0
+ORBIS_ENABLE_MENU_WIDGETS := 0
+ORBIS_ENABLE_7ZIP         := 0
+ORBIS_ENABLE_CHEEVOS      := 0
+ORBIS_ENABLE_OVERLAY      := 0
+ORBIS_MENU_DRIVER         := rgui
+DEBUG                     := 0
+else ifeq ($(ORBIS_BUILD_PROFILE),full)
+ORBIS_ENABLE_PS4LINK      := 0
+ORBIS_ENABLE_DEBUGNET     := 0
+ORBIS_ENABLE_MENU_WIDGETS := 1
+ORBIS_ENABLE_7ZIP         := 1
+ORBIS_ENABLE_CHEEVOS      := 1
+ORBIS_ENABLE_OVERLAY      := 1
+ORBIS_MENU_DRIVER         := xmb
+DEBUG                     := 0
+else ifeq ($(ORBIS_BUILD_PROFILE),dev)
+ORBIS_ENABLE_PS4LINK      := 1
+ORBIS_ENABLE_DEBUGNET     := 1
+ORBIS_ENABLE_MENU_WIDGETS := 1
+ORBIS_ENABLE_7ZIP         := 1
+ORBIS_ENABLE_CHEEVOS      := 1
+ORBIS_ENABLE_OVERLAY      := 1
+ORBIS_MENU_DRIVER         := xmb
+DEBUG                     := 1
+endif
 
 PS4_TITLE_ID	:= RETROARCH
 PS4_TITLE_NAME	:= RetroArch
@@ -47,9 +80,9 @@ else
 	HAVE_RBMP		:= 1
 	HAVE_RTGA		:= 1
 	HAVE_ZLIB		:= 1
-	HAVE_OVERLAY		:= 1
+	HAVE_OVERLAY		:= $(ORBIS_ENABLE_OVERLAY)
 	HAVE_VIDEO_LAYOUT := 0
-	HAVE_7ZIP		:= 1
+	HAVE_7ZIP		:= $(ORBIS_ENABLE_7ZIP)
 	HAVE_EGL 		:= 1
 	HAVE_MENU_WIDGETS := $(ORBIS_ENABLE_MENU_WIDGETS)
 	HAVE_GLSL      := 1
@@ -61,7 +94,7 @@ else
 	HAVE_THREADS		:= 1
 	HAVE_LIBRETRODB		:= 1
 	HAVE_CC_RESAMPLER	:= 1
-	HAVE_CHEEVOS		:= 1
+	HAVE_CHEEVOS		:= $(ORBIS_ENABLE_CHEEVOS)
 	RARCH_CONSOLE		:= 1
 	HAVE_STATIC_VIDEO_FILTERS = 1
 	HAVE_STATIC_AUDIO_FILTERS = 1
@@ -119,6 +152,7 @@ CFLAGS += -D__PS4__ -I$(ORBISDEV)/include -I $(ORBISDEV)/include/sce
 CFLAGS += -target x86_64-scei-ps4-elf -fPIE
 CFLAGS += -DRARCH_INTERNAL -DRARCH_CONSOLE
 CFLAGS += -DHAVE_FILTERS_BUILTIN $(DEFINES)
+CFLAGS += -DORBIS_BUILD_PROFILE='\"$(ORBIS_BUILD_PROFILE)\"'
 
 ifeq ($(HAVE_RGUI),1)
    CFLAGS += -DHAVE_RGUI
@@ -166,7 +200,37 @@ TARGETS := $(TARGET).elf
 DEPFLAGS    = -MT $@ -MMD -MP -MF $*.Tdepend
 POSTCOMPILE = mv -f $*.Tdepend $*.depend
 
+.DEFAULT_GOAL := all
+
 all: $(TARGETS)
+
+dev:
+	$(MAKE) --no-print-directory all ORBIS_BUILD_PROFILE=dev
+
+full:
+	$(MAKE) --no-print-directory all ORBIS_BUILD_PROFILE=full
+
+lite:
+	$(MAKE) --no-print-directory all ORBIS_BUILD_PROFILE=lite
+
+help:
+	@echo "Orbis build profiles:"
+	@echo "  make -f Makefile.orbis dev   # debug-oriented build with ps4link/debugnet"
+	@echo "  make -f Makefile.orbis full  # release build with current feature set"
+	@echo "  make -f Makefile.orbis lite  # lean release build with rgui and optional extras off"
+	@echo ""
+	@echo "Override knobs: ORBIS_ENABLE_PS4LINK, ORBIS_ENABLE_DEBUGNET, ORBIS_ENABLE_MENU_WIDGETS, ORBIS_ENABLE_7ZIP, ORBIS_ENABLE_CHEEVOS, ORBIS_ENABLE_OVERLAY, ORBIS_MENU_DRIVER"
+
+info:
+	@echo "ORBIS_BUILD_PROFILE=$(ORBIS_BUILD_PROFILE)"
+	@echo "DEBUG=$(DEBUG)"
+	@echo "ORBIS_MENU_DRIVER=$(ORBIS_MENU_DRIVER)"
+	@echo "ORBIS_ENABLE_PS4LINK=$(ORBIS_ENABLE_PS4LINK)"
+	@echo "ORBIS_ENABLE_DEBUGNET=$(ORBIS_ENABLE_DEBUGNET)"
+	@echo "ORBIS_ENABLE_MENU_WIDGETS=$(ORBIS_ENABLE_MENU_WIDGETS)"
+	@echo "ORBIS_ENABLE_7ZIP=$(ORBIS_ENABLE_7ZIP)"
+	@echo "ORBIS_ENABLE_CHEEVOS=$(ORBIS_ENABLE_CHEEVOS)"
+	@echo "ORBIS_ENABLE_OVERLAY=$(ORBIS_ENABLE_OVERLAY)"
 
 %.o: %.cpp
 %.o: %.cpp %.depend
@@ -197,7 +261,7 @@ clean:
 	rm -f $(OBJ) $(TARGET).elf
 	rm -f $(OBJ:.o=.depend)
 
-.PHONY: clean all
+.PHONY: clean all dev full lite help info
 .PRECIOUS: %.depend
 
 -include $(OBJ:.o=.depend)
