@@ -152,6 +152,12 @@ static void frontend_orbis_get_environment_settings(int *argc, char *argv[],
 
    RARCH_LOG("port dir: [%s]\n", g_defaults.dirs[DEFAULT_DIR_PORT]);
 
+#ifdef ORBIS_LITE_BUILD
+   strlcpy(g_defaults.settings.menu, "rgui", sizeof(g_defaults.settings.menu));
+   g_defaults.overlay.set    = true;
+   g_defaults.overlay.enable = false;
+#endif
+
    /* bundle data*/
    fill_pathname_join(g_defaults.dirs[DEFAULT_DIR_CORE], g_defaults.dirs[DEFAULT_DIR_PORT],
          "", sizeof(g_defaults.dirs[DEFAULT_DIR_CORE]));
@@ -204,8 +210,12 @@ static void frontend_orbis_get_environment_settings(int *argc, char *argv[],
          file_path_str(FILE_PATH_MAIN_CONFIG), sizeof(g_defaults.path.config));
 
 #ifndef IS_SALAMANDER
-   params          = (struct rarch_main_wrap*)params_data;
+   params = (struct rarch_main_wrap*)params_data;
+#ifdef ORBIS_LITE_BUILD
+   params->verbose = false;
+#else
    params->verbose = true;
+#endif
 
    if (argc && *argc > 2 && !string_is_empty(argv[2]))
    {
