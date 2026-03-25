@@ -63,6 +63,91 @@ else
 	HAVE_XMB := 1
 endif
 
+ifeq ($(strip $(ORBISDEV)),)
+ifeq ($(strip $(PS4SDK)),)
+$(error "Please set ORBISDEV or PS4SDK in your environment.")
+endif
+ORBISDEV := $(PS4SDK)
+endif
+
+ifneq ($(wildcard $(ORBISDEV)/usr/include),)
+ORBIS_INCLUDE_ROOT := $(ORBISDEV)/usr/include
+ORBIS_TOOLCHAIN_LAYOUT := modern
+else
+ORBIS_INCLUDE_ROOT := $(ORBISDEV)/include
+ORBIS_TOOLCHAIN_LAYOUT := legacy
+endif
+
+ifneq ($(wildcard $(ORBISDEV)/usr/lib),)
+ORBIS_LIB_ROOT := $(ORBISDEV)/usr/lib
+else
+ORBIS_LIB_ROOT := $(ORBISDEV)/lib
+endif
+
+ifneq ($(wildcard $(ORBIS_INCLUDE_ROOT)/sce),)
+ORBIS_PLATFORM_INCLUDE_ROOT := $(ORBIS_INCLUDE_ROOT)/sce
+else ifneq ($(wildcard $(ORBIS_INCLUDE_ROOT)/orbis),)
+ORBIS_PLATFORM_INCLUDE_ROOT := $(ORBIS_INCLUDE_ROOT)/orbis
+else
+ORBIS_PLATFORM_INCLUDE_ROOT := $(ORBIS_INCLUDE_ROOT)
+endif
+
+ifneq ($(wildcard $(ORBIS_LIB_ROOT)/crt0.o),)
+CRTFILE ?= $(ORBIS_LIB_ROOT)/crt0.o
+else ifneq ($(wildcard $(ORBISDEV)/crt0.s),)
+CRTFILE ?= $(ORBISDEV)/crt0.s
+else
+CRTFILE ?= $(ORBIS_LIB_ROOT)/crt0.o
+endif
+
+export PATH := $(PATH):$(ORBISDEV)/bin
+
+PREFIX :=
+
+CC      := $(PREFIX)clang
+CXX     := $(PREFIX)clang
+AS      := $(PREFIX)clang
+AR      := $(PREFIX)ar
+OBJCOPY := $(PREFIX)objcopy
+STRIP   := $(PREFIX)strip
+NM      := $(PREFIX)nm
+LD      := $(CXX)
+
+INCDIRS := -I. -Ideps/libz -Ideps/7zip -Ilibretro-common/include -Ideps/stb -Ilibretro-common/include/compat/zlib
+LIBDIRS := -L.
+
+ARCHFLAGS := -m64 -DORBIS
+CFLAGS    += $(ARCHFLAGS) -std=c11 -mcmodel=large -ffreestanding -nostdlib -nostdinc -fno-builtin -fno-stack-protector -ffunction-sections -fdata-sections
+
+ifeq ($(DEBUG), 1)
+   CFLAGS += -O2 -g
+else
+   CFLAGS += -O3
+endif
+
+ASFLAGS := $(ARCHFLAGS) -I$(ORBIS_INCLUDE_ROOT) -target x86_64-scei-ps4-elf -fPIE
+LDFLAGS := -O3 -Wall -m64 -nostartfiles -nostdlib -L$(ORBIS_LIB_ROOT) -pie -Wl,--gc-sections
+ARFLAGS := rcs
+
+CFLAGS += -Wall -pedantic -Wno-zero-length-array -Wno-format-pedantic
+CFLAGS += -D__PS4__ -I$(ORBIS_INCLUDE_ROOT) -I$(ORBIS_PLATFORM_INCLUDE_ROOT)
+CFLAGS += -target x86_64-scei-ps4-elf -fPIE
+CFLAGS += -DRARCH_INTERNAL -DRARCH_CONSOLE
+CFLAGS += -DHAVE_FILTERS_BUILTIN $(DEFINES)
+CFLAGS += -DORBIS_BUILD_PROFILE='\"$(ORBIS_BUILD_PROFILE)\"'
+
+ifeq ($(HAVE_RGUI),1)
+   CFLAGS += -DHAVE_RGUI
+endif
+
+ifeq ($(HAVE_MATERIALUI),1)
+   CFLAGS += -DHAVE_MATERIALUI
+endif
+
+ifeq ($(HAVE_XMB),1)
+   CFLAGS += -DHAVE_XMB
+endif
+
 ifeq ($(GRIFFIN_BUILD), 1)
 	OBJ += griffin/griffin.o
 	DEFINES += -DHAVE_GRIFFIN=1
@@ -107,63 +192,6 @@ else
 	CFLAGS += $(DEF_FLAGS)
 	BLACKLIST :=
 	OBJ := $(filter-out $(BLACKLIST),$(OBJ))
-endif
-
-ifeq ($(strip $(ORBISDEV)),)
-ifeq ($(strip $(PS4SDK)),)
-$(error "Please set ORBISDEV or PS4SDK in your environment.")
-endif
-ORBISDEV := $(PS4SDK)
-endif
-
-export PATH := $(PATH):$(ORBISDEV)/bin
-
-PREFIX :=
-
-CC      := $(PREFIX)clang
-CXX     := $(PREFIX)clang
-AS      := $(PREFIX)clang
-AR      := $(PREFIX)ar
-OBJCOPY := $(PREFIX)objcopy
-STRIP   := $(PREFIX)strip
-NM      := $(PREFIX)nm
-LD      := $(CXX)
-
-INCDIRS := -I. -Ideps/libz -Ideps/7zip -Ilibretro-common/include -Ideps/stb -Ilibretro-common/include/compat/zlib
-LIBDIRS := -L.
-
-ARCHFLAGS := -m64 -DORBIS
-CFLAGS    += $(ARCHFLAGS) -std=c11 -mcmodel=large -ffreestanding -nostdlib -nostdinc -fno-builtin -fno-stack-protector -ffunction-sections -fdata-sections
-
-ifeq ($(DEBUG), 1)
-   CFLAGS += -O2 -g
-else
-   CFLAGS += -O3
-endif
-
-ASFLAGS := $(ARCHFLAGS) -I$(ORBISDEV)/include -target x86_64-scei-ps4-elf -fPIE
-LDFLAGS := -O3 -Wall -m64 -nostartfiles -nostdlib -L$(ORBISDEV)/lib -pie -Wl,--gc-sections
-ARFLAGS := rcs
-
-CRTFILE ?= $(ORBISDEV)/crt0.s
-
-CFLAGS += -Wall -pedantic -Wno-zero-length-array -Wno-format-pedantic
-CFLAGS += -D__PS4__ -I$(ORBISDEV)/include -I $(ORBISDEV)/include/sce
-CFLAGS += -target x86_64-scei-ps4-elf -fPIE
-CFLAGS += -DRARCH_INTERNAL -DRARCH_CONSOLE
-CFLAGS += -DHAVE_FILTERS_BUILTIN $(DEFINES)
-CFLAGS += -DORBIS_BUILD_PROFILE='\"$(ORBIS_BUILD_PROFILE)\"'
-
-ifeq ($(HAVE_RGUI),1)
-   CFLAGS += -DHAVE_RGUI
-endif
-
-ifeq ($(HAVE_MATERIALUI),1)
-   CFLAGS += -DHAVE_MATERIALUI
-endif
-
-ifeq ($(HAVE_XMB),1)
-   CFLAGS += -DHAVE_XMB
 endif
 
 ifneq ($(PC_DEVELOPMENT_IP_ADDRESS),)
@@ -223,6 +251,11 @@ help:
 
 info:
 	@echo "ORBIS_BUILD_PROFILE=$(ORBIS_BUILD_PROFILE)"
+	@echo "ORBIS_TOOLCHAIN_LAYOUT=$(ORBIS_TOOLCHAIN_LAYOUT)"
+	@echo "ORBIS_INCLUDE_ROOT=$(ORBIS_INCLUDE_ROOT)"
+	@echo "ORBIS_PLATFORM_INCLUDE_ROOT=$(ORBIS_PLATFORM_INCLUDE_ROOT)"
+	@echo "ORBIS_LIB_ROOT=$(ORBIS_LIB_ROOT)"
+	@echo "CRTFILE=$(CRTFILE)"
 	@echo "DEBUG=$(DEBUG)"
 	@echo "ORBIS_MENU_DRIVER=$(ORBIS_MENU_DRIVER)"
 	@echo "ORBIS_ENABLE_PS4LINK=$(ORBIS_ENABLE_PS4LINK)"
