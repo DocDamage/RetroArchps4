@@ -31,9 +31,13 @@
 #include <orbisPad.h>
 #include <orbisAudio.h>
 #include <modplayer.h>
+#ifdef HAVE_PS4LINK
 #include <ps4link.h>
+#endif
 #include <orbisKeyboard.h>
+#ifdef HAVE_DEBUGNET
 #include <debugnet.h>
+#endif
 #include <orbisFile.h>
 
 #include <pthread.h>
@@ -62,36 +66,52 @@ typedef struct OrbisGlobalConf
 	OrbisPadConfig *confPad;
 	OrbisAudioConfig *confAudio;
 	OrbisKeyboardConfig *confKeyboard;
+#ifdef HAVE_PS4LINK
 	ps4LinkConfiguration *confLink;
+#else
+	void *confLink;
+#endif
 	int orbisLinkFlag;
 }OrbisGlobalConf;
 
-OrbisGlobalConf *myConf;
+static OrbisGlobalConf *myConf;
+static bool frontend_orbis_ps4link_initialized = false;
 
 char eboot_path[512];
 char user_path[512];
 
 static enum frontend_fork orbis_fork_mode = FRONTEND_FORK_NONE;
 
+static void frontend_orbis_attach_runtime_conf(int argc, char *argv[])
+{
+	uintptr_t intptr = 0;
+
+	if (myConf || argc <= 1 || string_is_empty(argv[1]))
+		return;
+
+	if (sscanf(argv[1], "%p", &intptr) != 1 || !intptr)
+		return;
+
+	myConf = (OrbisGlobalConf *)intptr;
+
+#ifdef HAVE_PS4LINK
+	if (myConf->confLink)
+	{
+		int ret = ps4LinkInitWithConf(myConf->confLink);
+		if (ret)
+			frontend_orbis_ps4link_initialized = true;
+		else
+			ps4LinkFinish();
+	}
+#endif
+}
+
 #ifdef __cplusplus
 extern "C"
 #endif
 int main(int argc, char *argv[])
 {
-   int ret;
-
    sceSystemServiceHideSplashScreen();
-
-	uintptr_t intptr=0;
-	sscanf(argv[1],"%p",&intptr);
-	myConf=(OrbisGlobalConf *)intptr;
-	ret=ps4LinkInitWithConf(myConf->confLink);
-	if(!ret)
-	{
-		ps4LinkFinish();
-		return -1;
-	}
-
    return rarch_main(argc, argv, NULL);
 }
 
@@ -111,29 +131,32 @@ static void frontend_orbis_get_environment_settings(int *argc, char *argv[],
 #endif
 #endif
 
-   int ret;
-
    sceSystemServiceHideSplashScreen();
 
-	uintptr_t intptr=0;
-	sscanf(argv[1],"%p",&intptr);
-   argv[1] = NULL;
-	myConf=(OrbisGlobalConf *)intptr;
-	ret=ps4LinkInitWithConf(myConf->confLink);
-	if(!ret)
-	{
-		ps4LinkFinish();
-		return;
-	}
+   frontend_orbis_attach_runtime_conf(argc ? *argc : 0, argv);
+
+   if (argv && argc && *argc > 1)
+      argv[1] = NULL;
+
    orbisFileInit();
-   orbisPadInitWithConf(myConf->confPad);
-   scePadClose(myConf->confPad->padHandle);
+
+   if (myConf && myConf->confPad)
+   {
+      orbisPadInitWithConf(myConf->confPad);
+      scePadClose(myConf->confPad->padHandle);
+   }
 
    strlcpy(eboot_path, "host0:app", sizeof(eboot_path));
    strlcpy(g_defaults.dirs[DEFAULT_DIR_PORT], eboot_path, sizeof(g_defaults.dirs[DEFAULT_DIR_PORT]));
    strlcpy(user_path, "host0:app/data/retroarch/", sizeof(user_path));
 
    RARCH_LOG("port dir: [%s]\n", g_defaults.dirs[DEFAULT_DIR_PORT]);
+
+#ifdef ORBIS_LITE_BUILD
+   strlcpy(g_defaults.settings.menu, "rgui", sizeof(g_defaults.settings.menu));
+   g_defaults.overlay.set    = true;
+   g_defaults.overlay.enable = false;
+#endif
 
    /* bundle data*/
    fill_pathname_join(g_defaults.dirs[DEFAULT_DIR_CORE], g_defaults.dirs[DEFAULT_DIR_PORT],
@@ -143,6 +166,8 @@ static void frontend_orbis_get_environment_settings(int *argc, char *argv[],
    /* user data*/
    fill_pathname_join(g_defaults.dirs[DEFAULT_DIR_ASSETS], user_path,
          "assets", sizeof(g_defaults.dirs[DEFAULT_DIR_ASSETS]));
+   fill_pathname_join(g_defaults.dirs[DEFAULT_DIR_AUTOCONFIG], user_path,
+         "autoconfig", sizeof(g_defaults.dirs[DEFAULT_DIR_AUTOCONFIG]));
    fill_pathname_join(g_defaults.dirs[DEFAULT_DIR_DATABASE], user_path,
          "database/rdb", sizeof(g_defaults.dirs[DEFAULT_DIR_DATABASE]));
    fill_pathname_join(g_defaults.dirs[DEFAULT_DIR_CURSOR], user_path,
@@ -163,6 +188,8 @@ static void frontend_orbis_get_environment_settings(int *argc, char *argv[],
          "savestates", sizeof(g_defaults.dirs[DEFAULT_DIR_SAVESTATE]));
    fill_pathname_join(g_defaults.dirs[DEFAULT_DIR_SYSTEM], user_path,
          "system", sizeof(g_defaults.dirs[DEFAULT_DIR_SYSTEM]));
+   fill_pathname_join(g_defaults.dirs[DEFAULT_DIR_SHADER], user_path,
+         "shaders", sizeof(g_defaults.dirs[DEFAULT_DIR_SHADER]));
    fill_pathname_join(g_defaults.dirs[DEFAULT_DIR_CACHE], user_path,
          "temp", sizeof(g_defaults.dirs[DEFAULT_DIR_CACHE]));
    fill_pathname_join(g_defaults.dirs[DEFAULT_DIR_OVERLAY], user_path,
@@ -173,6 +200,8 @@ static void frontend_orbis_get_environment_settings(int *argc, char *argv[],
 #endif
    fill_pathname_join(g_defaults.dirs[DEFAULT_DIR_THUMBNAILS], user_path,
          "thumbnails", sizeof(g_defaults.dirs[DEFAULT_DIR_THUMBNAILS]));
+   fill_pathname_join(g_defaults.dirs[DEFAULT_DIR_SCREENSHOT], user_path,
+         "screenshots", sizeof(g_defaults.dirs[DEFAULT_DIR_SCREENSHOT]));
    fill_pathname_join(g_defaults.dirs[DEFAULT_DIR_LOGS], user_path,
          "logs", sizeof(g_defaults.dirs[DEFAULT_DIR_LOGS]));
    strlcpy(g_defaults.dirs[DEFAULT_DIR_CONTENT_HISTORY],
@@ -181,10 +210,14 @@ static void frontend_orbis_get_environment_settings(int *argc, char *argv[],
          file_path_str(FILE_PATH_MAIN_CONFIG), sizeof(g_defaults.path.config));
 
 #ifndef IS_SALAMANDER
-   params          = (struct rarch_main_wrap*)params_data;
+   params = (struct rarch_main_wrap*)params_data;
+#ifdef ORBIS_LITE_BUILD
+   params->verbose = false;
+#else
    params->verbose = true;
+#endif
 
-   if (!string_is_empty(argv[2]))
+   if (argc && *argc > 2 && !string_is_empty(argv[2]))
    {
       static char path[PATH_MAX_LENGTH] = {0};
       struct rarch_main_wrap      *args =
@@ -203,9 +236,9 @@ static void frontend_orbis_get_environment_settings(int *argc, char *argv[],
          args->content_path   = path;
          args->libretro_path  = NULL;
 
-         RARCH_LOG("argv[0]: %s\n", argv[0]);
-         RARCH_LOG("argv[1]: %s\n", argv[1]);
-         RARCH_LOG("argv[2]: %s\n", argv[2]);
+         RARCH_LOG("argv[0]: %s\n", argv[0] ? argv[0] : "(null)");
+         RARCH_LOG("argv[1]: %s\n", argv[1] ? argv[1] : "(null)");
+         RARCH_LOG("argv[2]: %s\n", argv[2] ? argv[2] : "(null)");
 
          RARCH_LOG("Auto-start game %s.\n", argv[2]);
       }
@@ -230,7 +263,10 @@ static void frontend_orbis_deinit(void *data)
 #endif
 
 #endif
-	ps4LinkFinish();
+#ifdef HAVE_PS4LINK
+	if (frontend_orbis_ps4link_initialized)
+		ps4LinkFinish();
+#endif
 }
 
 static void frontend_orbis_shutdown(bool unused)
@@ -333,6 +369,16 @@ static int frontend_orbis_parse_drive_list(void *data, bool load_content)
 
    menu_entries_append_enum(list,
          "host0:app",
+         msg_hash_to_str(MENU_ENUM_LABEL_FILE_DETECT_CORE_LIST_PUSH_DIR),
+         enum_idx,
+         FILE_TYPE_DIRECTORY, 0, 0);
+   menu_entries_append_enum(list,
+         "host0:app/data",
+         msg_hash_to_str(MENU_ENUM_LABEL_FILE_DETECT_CORE_LIST_PUSH_DIR),
+         enum_idx,
+         FILE_TYPE_DIRECTORY, 0, 0);
+   menu_entries_append_enum(list,
+         "host0:app/data/retroarch",
          msg_hash_to_str(MENU_ENUM_LABEL_FILE_DETECT_CORE_LIST_PUSH_DIR),
          enum_idx,
          FILE_TYPE_DIRECTORY, 0, 0);

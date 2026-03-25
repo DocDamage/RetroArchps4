@@ -3,6 +3,44 @@ DEBUG               ?= 0
 GRIFFIN_BUILD        = 0
 WHOLE_ARCHIVE_LINK   = 0
 
+ORBIS_BUILD_PROFILE        ?= custom
+ORBIS_ENABLE_PS4LINK       ?= 1
+ORBIS_ENABLE_DEBUGNET      ?= 1
+ORBIS_ENABLE_MENU_WIDGETS  ?= 1
+ORBIS_ENABLE_7ZIP          ?= 1
+ORBIS_ENABLE_CHEEVOS       ?= 1
+ORBIS_ENABLE_OVERLAY       ?= 1
+ORBIS_MENU_DRIVER          ?= xmb
+
+ifeq ($(ORBIS_BUILD_PROFILE),lite)
+ORBIS_ENABLE_PS4LINK      := 0
+ORBIS_ENABLE_DEBUGNET     := 0
+ORBIS_ENABLE_MENU_WIDGETS := 0
+ORBIS_ENABLE_7ZIP         := 0
+ORBIS_ENABLE_CHEEVOS      := 0
+ORBIS_ENABLE_OVERLAY      := 0
+ORBIS_MENU_DRIVER         := rgui
+DEBUG                     := 0
+else ifeq ($(ORBIS_BUILD_PROFILE),full)
+ORBIS_ENABLE_PS4LINK      := 0
+ORBIS_ENABLE_DEBUGNET     := 0
+ORBIS_ENABLE_MENU_WIDGETS := 1
+ORBIS_ENABLE_7ZIP         := 1
+ORBIS_ENABLE_CHEEVOS      := 1
+ORBIS_ENABLE_OVERLAY      := 1
+ORBIS_MENU_DRIVER         := xmb
+DEBUG                     := 0
+else ifeq ($(ORBIS_BUILD_PROFILE),dev)
+ORBIS_ENABLE_PS4LINK      := 1
+ORBIS_ENABLE_DEBUGNET     := 1
+ORBIS_ENABLE_MENU_WIDGETS := 1
+ORBIS_ENABLE_7ZIP         := 1
+ORBIS_ENABLE_CHEEVOS      := 1
+ORBIS_ENABLE_OVERLAY      := 1
+ORBIS_MENU_DRIVER         := xmb
+DEBUG                     := 1
+endif
+
 PS4_TITLE_ID	:= RETROARCH
 PS4_TITLE_NAME	:= RetroArch
 
@@ -12,6 +50,107 @@ PC_DEVELOPMENT_UDP_PORT	   =
 OBJ :=
 
 DEFINES :=
+
+HAVE_RGUI       := 0
+HAVE_MATERIALUI := 0
+HAVE_XMB        := 0
+
+ifeq ($(ORBIS_MENU_DRIVER),rgui)
+	HAVE_RGUI := 1
+else ifeq ($(ORBIS_MENU_DRIVER),materialui)
+	HAVE_MATERIALUI := 1
+else
+	HAVE_XMB := 1
+endif
+
+ifeq ($(strip $(ORBISDEV)),)
+ifeq ($(strip $(PS4SDK)),)
+$(error "Please set ORBISDEV or PS4SDK in your environment.")
+endif
+ORBISDEV := $(PS4SDK)
+endif
+
+ifneq ($(wildcard $(ORBISDEV)/usr/include),)
+ORBIS_INCLUDE_ROOT := $(ORBISDEV)/usr/include
+ORBIS_TOOLCHAIN_LAYOUT := modern
+else
+ORBIS_INCLUDE_ROOT := $(ORBISDEV)/include
+ORBIS_TOOLCHAIN_LAYOUT := legacy
+endif
+
+ifneq ($(wildcard $(ORBISDEV)/usr/lib),)
+ORBIS_LIB_ROOT := $(ORBISDEV)/usr/lib
+else
+ORBIS_LIB_ROOT := $(ORBISDEV)/lib
+endif
+
+ifneq ($(wildcard $(ORBIS_INCLUDE_ROOT)/sce),)
+ORBIS_PLATFORM_INCLUDE_ROOT := $(ORBIS_INCLUDE_ROOT)/sce
+else ifneq ($(wildcard $(ORBIS_INCLUDE_ROOT)/orbis),)
+ORBIS_PLATFORM_INCLUDE_ROOT := $(ORBIS_INCLUDE_ROOT)/orbis
+else
+ORBIS_PLATFORM_INCLUDE_ROOT := $(ORBIS_INCLUDE_ROOT)
+endif
+
+ifneq ($(wildcard $(ORBIS_LIB_ROOT)/crt0.o),)
+CRTFILE ?= $(ORBIS_LIB_ROOT)/crt0.o
+else ifneq ($(wildcard $(ORBISDEV)/crt0.s),)
+CRTFILE ?= $(ORBISDEV)/crt0.s
+else
+CRTFILE ?= $(ORBIS_LIB_ROOT)/crt0.o
+endif
+
+export PATH := $(PATH):$(ORBISDEV)/bin
+
+PREFIX :=
+
+CC      := $(PREFIX)clang
+CXX     := $(PREFIX)clang
+AS      := $(PREFIX)clang
+AR      := $(PREFIX)ar
+OBJCOPY := $(PREFIX)objcopy
+STRIP   := $(PREFIX)strip
+NM      := $(PREFIX)nm
+LD      := $(CXX)
+
+INCDIRS := -I. -Ideps/libz -Ideps/7zip -Ilibretro-common/include -Ideps/stb -Ilibretro-common/include/compat/zlib
+LIBDIRS := -L.
+
+ARCHFLAGS := -m64 -DORBIS
+CFLAGS    += $(ARCHFLAGS) -std=c11 -mcmodel=large -ffreestanding -nostdlib -nostdinc -fno-builtin -fno-stack-protector -ffunction-sections -fdata-sections
+
+ifeq ($(DEBUG), 1)
+   CFLAGS += -O2 -g
+else
+   CFLAGS += -O3
+endif
+
+ASFLAGS := $(ARCHFLAGS) -I$(ORBIS_INCLUDE_ROOT) -target x86_64-scei-ps4-elf -fPIE
+LDFLAGS := -O3 -Wall -m64 -nostartfiles -nostdlib -L$(ORBIS_LIB_ROOT) -pie -Wl,--gc-sections
+ARFLAGS := rcs
+
+CFLAGS += -Wall -pedantic -Wno-zero-length-array -Wno-format-pedantic
+CFLAGS += -D__PS4__ -I$(ORBIS_INCLUDE_ROOT) -I$(ORBIS_PLATFORM_INCLUDE_ROOT)
+CFLAGS += -target x86_64-scei-ps4-elf -fPIE
+CFLAGS += -DRARCH_INTERNAL -DRARCH_CONSOLE
+CFLAGS += -DHAVE_FILTERS_BUILTIN $(DEFINES)
+CFLAGS += -DORBIS_BUILD_PROFILE='\"$(ORBIS_BUILD_PROFILE)\"'
+
+ifeq ($(ORBIS_BUILD_PROFILE),lite)
+   CFLAGS += -DORBIS_LITE_BUILD
+endif
+
+ifeq ($(HAVE_RGUI),1)
+   CFLAGS += -DHAVE_RGUI
+endif
+
+ifeq ($(HAVE_MATERIALUI),1)
+   CFLAGS += -DHAVE_MATERIALUI
+endif
+
+ifeq ($(HAVE_XMB),1)
+   CFLAGS += -DHAVE_XMB
+endif
 
 ifeq ($(GRIFFIN_BUILD), 1)
 	OBJ += griffin/griffin.o
@@ -30,24 +169,21 @@ else
 	HAVE_RBMP		:= 1
 	HAVE_RTGA		:= 1
 	HAVE_ZLIB		:= 1
-	HAVE_OVERLAY		:= 1
+	HAVE_OVERLAY		:= $(ORBIS_ENABLE_OVERLAY)
 	HAVE_VIDEO_LAYOUT := 0
-	HAVE_7ZIP		:= 1
+	HAVE_7ZIP		:= $(ORBIS_ENABLE_7ZIP)
 	HAVE_EGL 		:= 1
-	HAVE_MENU_WIDGETS := 1
+	HAVE_MENU_WIDGETS := $(ORBIS_ENABLE_MENU_WIDGETS)
 	HAVE_GLSL      := 1
 	HAVE_OPENGLES  		:= 1
 	HAVE_NETWORKING		:= 0
 	HAVE_SOCKET_LEGACY	:= 0
 	HAVE_MENU		:= 1
 	HAVE_MENU_COMMON	:= 1
-	HAVE_RGUI		:= 0
-	HAVE_MATERIALUI 	:= 0
-	HAVE_XMB		:= 1
 	HAVE_THREADS		:= 1
 	HAVE_LIBRETRODB		:= 1
 	HAVE_CC_RESAMPLER	:= 1
-	HAVE_CHEEVOS		:= 1
+	HAVE_CHEEVOS		:= $(ORBIS_ENABLE_CHEEVOS)
 	RARCH_CONSOLE		:= 1
 	HAVE_STATIC_VIDEO_FILTERS = 1
 	HAVE_STATIC_AUDIO_FILTERS = 1
@@ -62,49 +198,8 @@ else
 	OBJ := $(filter-out $(BLACKLIST),$(OBJ))
 endif
 
-ifeq ($(strip $(PS4SDK)),)
-$(error "Please set PS4SDK in your environment. export PS4SDK=<path to>ps4sdk")
-endif
-
-export PATH := $(PATH):$(PS4SDK)/bin
-
-PREFIX :=
-
-CC      := $(PREFIX)clang
-CXX     := $(PREFIX)clang
-AS      := $(PREFIX)clang
-AR      := $(PREFIX)ar
-OBJCOPY := $(PREFIX)objcopy
-STRIP   := $(PREFIX)strip
-NM      := $(PREFIX)nm
-LD      := $(CXX)
-
-INCDIRS := -I. -Ideps/libz -Ideps/7zip -Ilibretro-common/include -Ideps/stb -Ilibretro-common/include/compat/zlib
-LIBDIRS := -L.
-
-ARCHFLAGS := -m64 -DORBIS
-CFLAGS    += $(ARCHFLAGS) -std=c11 -mcmodel=large -ffreestanding -nostdlib -nostdinc -fno-builtin -fno-stack-protector
-
-ifeq ($(DEBUG), 1)
-   CFLAGS += -O2 -g
-else
-   CFLAGS += -O3
-endif
-
-ASFLAGS := $(ARCHFLAGS) -I$(PS4SDK)/include -target x86_64-scei-ps4-elf -fPIE
-LDFLAGS := -O3 -Wall -m64 -nostartfiles -nostdlib -L$(PS4SDK)/lib -pie
-ARFLAGS := rcs
-
-CRTFILE ?= $(PS4SDK)/crt0.s
-
-CFLAGS += -Wall -pedantic -Wno-zero-length-array -Wno-format-pedantic
-CFLAGS += -D__PS4__ -I$(PS4SDK)/include -I $(PS4SDK)/include/sce
-CFLAGS += -target x86_64-scei-ps4-elf -fPIE
-CFLAGS += -DRARCH_INTERNAL -DRARCH_CONSOLE
-CFLAGS += -DHAVE_FILTERS_BUILTIN $(DEFINES)
-
 ifneq ($(PC_DEVELOPMENT_IP_ADDRESS),)
-   CFLAGS += -DPC_DEVELOPMENT_IP_ADDRESS='"$(PC_DEVELOPMENT_IP_ADDRESS)"'
+   CFLAGS += -DPC_DEVELOPMENT_IP_ADDRESS='\"$(PC_DEVELOPMENT_IP_ADDRESS)\"'
 endif
 
 ifneq ($(PC_DEVELOPMENT_UDP_PORT),)
@@ -117,8 +212,18 @@ ifeq ($(WHOLE_ARCHIVE_LINK), 1)
 endif
 CXXFLAGS := $(CFLAGS)
 
-PS4_LIBS := -lps4link -ldebugnet -lorbisFile -lelfloader -lorbisKeyboard -lorbis2d -lpng -lz -lorbisGl -lorbisPad -lorbisAudio -lmod -lorbisFileBrowser -lorbisXbmFont -lSceNet_stub -lScePigletv2VSH_stub -lSceSystemService_stub -lSceUserService_stub -lScePad_stub -lSceAudioOut_stub -lSceIme_stub -lSceSysmodule_stub \
+PS4_LIBS := -lorbisFile -lelfloader -lorbisKeyboard -lorbis2d -lpng -lz -lorbisGl -lorbisPad -lorbisAudio -lmod -lorbisFileBrowser -lorbisXbmFont -lSceNet_stub -lScePigletv2VSH_stub -lSceSystemService_stub -lSceUserService_stub -lScePad_stub -lSceAudioOut_stub -lSceIme_stub -lSceSysmodule_stub \
 	-lPs4_extension_kernel_call_standard -lPs4_extension_kernel_execute_dynlib_prepare_dlclose -lPs4_common_kernel -lPs4_common_user -lPs4_common_generic -lPs4LibCInternalAdaptive_stub -lPs4LibKernelAdaptive_stub -lSceLibcInternal_stub -lkernel_stub -lps4Kernel_stub -lPs4_base_stub_resolve_minimal -lPs4_base_kernel_dlsym_standard -lPs4_base_kernel_seek_elf_address_standard -lPs4_base_assembler_register_parameter_standard -lPs4_base_assembler_system_call_standard
+
+ifeq ($(ORBIS_ENABLE_PS4LINK),1)
+   CFLAGS += -DHAVE_PS4LINK
+   PS4_LIBS += -lps4link
+endif
+
+ifeq ($(ORBIS_ENABLE_DEBUGNET),1)
+   CFLAGS += -DHAVE_DEBUGNET
+   PS4_LIBS += -ldebugnet
+endif
 
 LIBS	:= $(WHOLE_START) -lretro_orbis $(WHOLE_END) $(PS4_LIBS)
 
@@ -127,7 +232,42 @@ TARGETS := $(TARGET).elf
 DEPFLAGS    = -MT $@ -MMD -MP -MF $*.Tdepend
 POSTCOMPILE = mv -f $*.Tdepend $*.depend
 
+.DEFAULT_GOAL := all
+
 all: $(TARGETS)
+
+dev:
+	$(MAKE) --no-print-directory all ORBIS_BUILD_PROFILE=dev
+
+full:
+	$(MAKE) --no-print-directory all ORBIS_BUILD_PROFILE=full
+
+lite:
+	$(MAKE) --no-print-directory all ORBIS_BUILD_PROFILE=lite
+
+help:
+	@echo "Orbis build profiles:"
+	@echo "  make -f Makefile.orbis dev   # debug-oriented build with ps4link/debugnet"
+	@echo "  make -f Makefile.orbis full  # release build with current feature set"
+	@echo "  make -f Makefile.orbis lite  # lean release build with rgui and optional extras off"
+	@echo ""
+	@echo "Override knobs: ORBIS_ENABLE_PS4LINK, ORBIS_ENABLE_DEBUGNET, ORBIS_ENABLE_MENU_WIDGETS, ORBIS_ENABLE_7ZIP, ORBIS_ENABLE_CHEEVOS, ORBIS_ENABLE_OVERLAY, ORBIS_MENU_DRIVER"
+
+info:
+	@echo "ORBIS_BUILD_PROFILE=$(ORBIS_BUILD_PROFILE)"
+	@echo "ORBIS_TOOLCHAIN_LAYOUT=$(ORBIS_TOOLCHAIN_LAYOUT)"
+	@echo "ORBIS_INCLUDE_ROOT=$(ORBIS_INCLUDE_ROOT)"
+	@echo "ORBIS_PLATFORM_INCLUDE_ROOT=$(ORBIS_PLATFORM_INCLUDE_ROOT)"
+	@echo "ORBIS_LIB_ROOT=$(ORBIS_LIB_ROOT)"
+	@echo "CRTFILE=$(CRTFILE)"
+	@echo "DEBUG=$(DEBUG)"
+	@echo "ORBIS_MENU_DRIVER=$(ORBIS_MENU_DRIVER)"
+	@echo "ORBIS_ENABLE_PS4LINK=$(ORBIS_ENABLE_PS4LINK)"
+	@echo "ORBIS_ENABLE_DEBUGNET=$(ORBIS_ENABLE_DEBUGNET)"
+	@echo "ORBIS_ENABLE_MENU_WIDGETS=$(ORBIS_ENABLE_MENU_WIDGETS)"
+	@echo "ORBIS_ENABLE_7ZIP=$(ORBIS_ENABLE_7ZIP)"
+	@echo "ORBIS_ENABLE_CHEEVOS=$(ORBIS_ENABLE_CHEEVOS)"
+	@echo "ORBIS_ENABLE_OVERLAY=$(ORBIS_ENABLE_OVERLAY)"
 
 %.o: %.cpp
 %.o: %.cpp %.depend
@@ -158,7 +298,7 @@ clean:
 	rm -f $(OBJ) $(TARGET).elf
 	rm -f $(OBJ:.o=.depend)
 
-.PHONY: clean all
+.PHONY: clean all dev full lite help info
 .PRECIOUS: %.depend
 
 -include $(OBJ:.o=.depend)
