@@ -60,9 +60,10 @@ int sceUserServiceGetLoginUserIdList(SceUserServiceLoginUserIdList* userIdList);
  */
 typedef struct
 {
-   SceUserServiceUserId userId;
-   int handle;
-   bool connected;
+   SceUserServiceUserId  userId;
+   int                   handle;
+   bool                  connected;
+   ScePadVibrationParam  rumble; /* last-submitted vibration state */
 } ds_joypad_state;
 
 static ds_joypad_state ds_joypad_states[PS4_MAX_ORBISPADS];
@@ -255,7 +256,21 @@ static bool ps4_joypad_query_pad(unsigned pad)
 static bool ps4_joypad_rumble(unsigned pad,
       enum retro_rumble_effect effect, uint16_t strength)
 {
-   return false;
+   uint8_t motor;
+
+   if (pad >= PS4_MAX_ORBISPADS || !ds_joypad_states[pad].connected)
+      return false;
+
+   /* Scale RetroArch 0-0xFFFF strength to DualShock4 0-0xFF motor range. */
+   motor = (uint8_t)(strength >> 8);
+
+   if (effect == RETRO_RUMBLE_STRONG)
+      ds_joypad_states[pad].rumble.largeMotor = motor;
+   else
+      ds_joypad_states[pad].rumble.smallMotor = motor;
+
+   return scePadSetVibration(ds_joypad_states[pad].handle,
+         &ds_joypad_states[pad].rumble) == 0;
 }
 
 static void ps4_joypad_destroy(void)
@@ -265,6 +280,9 @@ static void ps4_joypad_destroy(void)
    {
       if (ds_joypad_states[i].connected)
       {
+         /* Stop any active rumble before closing. */
+         ScePadVibrationParam zero = {0, 0};
+         scePadSetVibration(ds_joypad_states[i].handle, &zero);
          scePadClose(ds_joypad_states[i].handle);
          ds_joypad_states[i].connected = false;
          ds_joypad_states[i].handle    = 0;

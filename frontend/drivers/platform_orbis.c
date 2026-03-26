@@ -292,9 +292,22 @@ static uint64_t frontend_orbis_get_mem_total(void)
 
 static uint64_t frontend_orbis_get_mem_used(void)
 {
-   /* We don't have a cheap free-memory query without a BSD sysctl
-    * wrapper. Return 0 so the HUD shows "? / total" rather than
-    * a misleading number. */
+   /* Orbis OS is FreeBSD-based; /proc/self/statm is available on
+    * jailbreak kernels that expose procfs.  Field layout (pages):
+    *   size  resident  shared  text  lib  data  dt
+    * We return resident * PAGE_SIZE.  Falls back to 0 gracefully
+    * when procfs is not mounted (retail/stripped kernels). */
+   FILE    *f = fopen("/proc/self/statm", "r");
+   if (f)
+   {
+      unsigned long virt_pages, rss_pages;
+      if (fscanf(f, "%lu %lu", &virt_pages, &rss_pages) == 2)
+      {
+         fclose(f);
+         return (uint64_t)rss_pages * 4096ULL;
+      }
+      fclose(f);
+   }
    return 0;
 }
 

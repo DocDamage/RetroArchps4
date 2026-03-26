@@ -89,6 +89,10 @@ wiiu/wut/elf2rpl/elf2rpl
 /pkg/wiiu/retroarch
 /pkg/wiiu/wiiu
 /pkg/wiiu/rpx
+# PS4 (Orbis) packaging artifacts
+/pkg/eboot.bin
+/pkg/sce_sys/param.sfo
+UP0000-*.pkg
 /wiiu-devel.properties
 
 # 3ds

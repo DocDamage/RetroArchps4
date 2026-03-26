@@ -304,6 +304,14 @@ help:
 	@echo "  make -f Makefile.orbis lite-stripped  # stripped lean release artifact"
 	@echo ""
 	@echo "Override knobs: ORBIS_ENABLE_PS4LINK, ORBIS_ENABLE_DEBUGNET, ORBIS_ENABLE_MENU_WIDGETS, ORBIS_ENABLE_7ZIP, ORBIS_ENABLE_CHEEVOS, ORBIS_ENABLE_OVERLAY, ORBIS_ENABLE_KEYBOARD, ORBIS_ENABLE_MOUSE, ORBIS_MENU_DRIVER"
+	@echo ""
+	@echo "PKG packaging (requires OpenOrbis create-fself / create-pkg on PATH or in ORBISDEV/bin):"
+	@echo "  make -f Makefile.orbis pkg          # package current profile into .pkg"
+	@echo "  make -f Makefile.orbis pkg-full     # package full profile"
+	@echo "  make -f Makefile.orbis pkg-lite     # package lite profile"
+	@echo "  make -f Makefile.orbis fself        # wrap ELF into eboot.bin only"
+	@echo "  make -f Makefile.orbis sfo          # generate param.sfo only"
+	@echo "  PKG_TITLE_ID=XXXX00001 make pkg     # override title ID"
 
 info:
 	@echo "ORBIS_BUILD_PROFILE=$(ORBIS_BUILD_PROFILE)"
@@ -358,11 +366,68 @@ $(STRIPPED_TARGET): $(TARGET).elf
 	cp $< $@
 	$(STRIP) $(STRIP_FLAGS) $@
 
+# ─── PS4 PKG packaging ───────────────────────────────────────────────────────
+# Requires the OpenOrbis toolchain to provide create-fself and create-pkg.
+# Tools are looked up on PATH first, then under $(ORBISDEV)/bin/.
+#
+# Targets:
+#   fself        — wrap the ELF into an eboot.bin fake-self
+#   sfo          — generate pkg/sce_sys/param.sfo
+#   pkg          — build a full .pkg from the current profile
+#   pkg-full     — pkg with ORBIS_BUILD_PROFILE=full
+#   pkg-lite     — pkg with ORBIS_BUILD_PROFILE=lite
+
+PKG_TITLE_ID   ?= $(PS4_TITLE_ID)
+PKG_CONTENT_ID ?= UP0000-$(PKG_TITLE_ID)_00-RETROARCH000000
+
+PKG_DIR     := pkg
+PKG_SCE_SYS := $(PKG_DIR)/sce_sys
+PKG_EBOOT   := $(PKG_DIR)/eboot.bin
+PKG_SFO     := $(PKG_SCE_SYS)/param.sfo
+PKG_OUT     := $(PKG_CONTENT_ID).pkg
+
+CREATE_FSELF ?= $(or $(shell command -v create-fself 2>/dev/null),$(ORBISDEV)/bin/create-fself)
+CREATE_PKG   ?= $(or $(shell command -v create-pkg   2>/dev/null),$(ORBISDEV)/bin/create-pkg)
+
+$(PKG_SCE_SYS):
+	mkdir -p $@
+
+$(PKG_SFO): pkg/make_sfo.py | $(PKG_SCE_SYS)
+	python3 pkg/make_sfo.py \
+		--title    "$(PS4_TITLE_NAME)" \
+		--title-id "$(PKG_TITLE_ID)" \
+		-o $@
+
+$(PKG_EBOOT): $(TARGET).elf
+	mkdir -p $(PKG_DIR)
+	$(CREATE_FSELF) -in $< -out $@ --paid 0x3800000000000011
+
+fself: $(PKG_EBOOT)
+
+sfo: $(PKG_SFO)
+
+$(PKG_OUT): $(PKG_EBOOT) $(PKG_SFO)
+	$(CREATE_PKG) --in-dir $(PKG_DIR) --out-dir . \
+		--content-id $(PKG_CONTENT_ID)
+	@echo "PKG ready: $(PKG_OUT)"
+
+pkg: $(PKG_OUT)
+
+pkg-full:
+	$(MAKE) --no-print-directory pkg ORBIS_BUILD_PROFILE=full
+
+pkg-lite:
+	$(MAKE) --no-print-directory pkg ORBIS_BUILD_PROFILE=lite
+
 clean:
 	rm -f $(OBJ) $(TARGET).elf $(STRIPPED_TARGET)
 	rm -f $(OBJ:.o=.depend)
 
-.PHONY: clean all dev full lite stripped full-stripped lite-stripped help info size
+clean-pkg:
+	rm -rf $(PKG_DIR)/eboot.bin $(PKG_SCE_SYS)/param.sfo $(PKG_OUT)
+
+.PHONY: clean clean-pkg all dev full lite stripped full-stripped lite-stripped \
+        fself sfo pkg pkg-full pkg-lite help info size
 .PRECIOUS: %.depend
 
 -include $(OBJ:.o=.depend)
