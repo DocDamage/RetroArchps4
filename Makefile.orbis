@@ -12,6 +12,8 @@ ORBIS_ENABLE_CHEEVOS       ?= 1
 ORBIS_ENABLE_OVERLAY       ?= 1
 ORBIS_ENABLE_KEYBOARD      ?= 0
 ORBIS_ENABLE_MOUSE         ?= 0
+ORBIS_ENABLE_AUDIO         ?= 1
+ORBIS_ENABLE_APPEXEC       ?= 0
 ORBIS_MENU_DRIVER          ?= xmb
 
 ifeq ($(ORBIS_BUILD_PROFILE),lite)
@@ -21,6 +23,8 @@ ORBIS_ENABLE_MENU_WIDGETS := 0
 ORBIS_ENABLE_7ZIP         := 0
 ORBIS_ENABLE_CHEEVOS      := 0
 ORBIS_ENABLE_OVERLAY      := 0
+ORBIS_ENABLE_AUDIO        := 1
+ORBIS_ENABLE_APPEXEC      := 0
 ORBIS_MENU_DRIVER         := rgui
 DEBUG                     := 0
 else ifeq ($(ORBIS_BUILD_PROFILE),full)
@@ -242,6 +246,14 @@ endif
 ifeq ($(ORBIS_ENABLE_MOUSE),1)
    CFLAGS += -DHAVE_MOUSE
    PS4_LIBS += -lSceMouse_stub
+endif
+
+ifeq ($(ORBIS_ENABLE_AUDIO),1)
+   CFLAGS += -DHAVE_ORBIS_AUDIO
+endif
+
+ifeq ($(ORBIS_ENABLE_APPEXEC),1)
+   CFLAGS += -DHAVE_ORBIS_APPEXEC
 endif
 
 ifeq ($(ORBIS_ENABLE_PS4LINK),1)

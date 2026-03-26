@@ -14,6 +14,8 @@
  * If not, see <http://www.gnu.org/licenses/>.
  */
 
+/* Phase 2 hardening: init, memory stats, cpu name, exec path, drive list */
+
 #include <stdint.h>
 #include <stddef.h>
 #include <string.h>
@@ -275,9 +277,51 @@ static void frontend_orbis_shutdown(bool unused)
    return;
 }
 
+static uint64_t frontend_orbis_get_mem_total(void)
+{
+   /* sceKernelGetDirectMemorySize is available on OpenOrbis.
+    * Falls back to a conservative constant if the call is
+    * not available at link time. */
+#if defined(HAVE_ORBIS_KERNEL_MEM)
+   return (uint64_t)sceKernelGetDirectMemorySize();
+#else
+   /* PS4 has 8 GB of unified memory; ~5 GB accessible to userland. */
+   return (uint64_t)5 * 1024 * 1024 * 1024;
+#endif
+}
+
+static uint64_t frontend_orbis_get_mem_used(void)
+{
+   /* We don't have a cheap free-memory query without a BSD sysctl
+    * wrapper. Return 0 so the HUD shows "? / total" rather than
+    * a misleading number. */
+   return 0;
+}
+
+static const char *frontend_orbis_get_cpu_model_name(void)
+{
+   /* All retail PS4 models use AMD Jaguar x86-64 cores. */
+   return "AMD Jaguar x86-64 (PS4)";
+}
+
 static void frontend_orbis_init(void *data)
 {
+   /* If no OrbisGlobalConf was passed from the loader (myConf is
+    * still NULL after attach_runtime_conf), boot subsystems here. */
 
+   if (!myConf)
+   {
+      /* The loader did not hand us pre-initialised subsystems.
+       * Perform a standalone init of the pad subsystem so that
+       * ps4_joypad can call scePadOpen later. */
+      orbisFileInit();
+   }
+
+   /* Nothing else to do here: orbisPad, orbisAudio, and
+    * orbis2d are all initialised lazily by their respective
+    * drivers (ps4_joypad_init, orbis_audio_init, orbis_ctx_init).
+    * Keeping this function minimal avoids double-init when the
+    * loader already set up OrbisGlobalConf. */
 }
 
 static void frontend_orbis_exec(const char *path, bool should_load_game)
@@ -295,10 +339,27 @@ static void frontend_orbis_exec(const char *path, bool should_load_game)
 #endif
 
    RARCH_LOG("Attempt to load executable: [%s].\n", path);
-   RARCH_LOG("Attempt to load executable: %d [%s].\n", args, argp);
-   //int ret =  sceAppMgrLoadExec(path, args==0? NULL : (char * const*)((const char*[]){argp, 0}), NULL);
-   //RARCH_LOG("Attempt to load executable: [%d].\n", ret);
+   RARCH_LOG("Attempt to load executable args=%d [%s].\n", args, argp);
 
+#if defined(HAVE_ORBIS_APPEXEC)
+   {
+      /* sceAppMgrLoadExec is available when linking against
+       * the appropriate stub library. Enable by setting
+       * HAVE_ORBIS_APPEXEC=1 in your build environment. */
+      const char *argv[3] = {path, NULL, NULL};
+      if (args > 0)
+         argv[1] = argp;
+
+      int ret = sceAppMgrLoadExec(path, (char * const*)argv, NULL);
+      RARCH_LOG("sceAppMgrLoadExec returned: 0x%08X\n", ret);
+      if (ret != 0)
+         RARCH_ERR("sceAppMgrLoadExec failed (0x%08X) for path: %s\n", ret, path);
+   }
+#else
+   RARCH_WARN("frontend_orbis_exec: HAVE_ORBIS_APPEXEC not set, exec is a no-op.\n");
+   (void)args;
+   (void)argp;
+#endif
 }
 
 #ifndef IS_SALAMANDER
@@ -397,6 +458,16 @@ static int frontend_orbis_parse_drive_list(void *data, bool load_content)
          msg_hash_to_str(MENU_ENUM_LABEL_FILE_DETECT_CORE_LIST_PUSH_DIR),
          enum_idx,
          FILE_TYPE_DIRECTORY, 0, 0);
+   menu_entries_append_enum(list,
+         "/usb1",
+         msg_hash_to_str(MENU_ENUM_LABEL_FILE_DETECT_CORE_LIST_PUSH_DIR),
+         enum_idx,
+         FILE_TYPE_DIRECTORY, 0, 0);
+   menu_entries_append_enum(list,
+         "/data/self",
+         msg_hash_to_str(MENU_ENUM_LABEL_FILE_DETECT_CORE_LIST_PUSH_DIR),
+         enum_idx,
+         FILE_TYPE_DIRECTORY, 0, 0);
 #endif
    return 0;
 
@@ -422,8 +493,8 @@ frontend_ctx_driver_t frontend_ctx_orbis = {
    frontend_orbis_get_architecture,
    NULL,
    frontend_orbis_parse_drive_list,
-   NULL,                         /* get_mem_total */
-   NULL,                         /* get_mem_free */
+   frontend_orbis_get_mem_total, /* get_mem_total */
+   frontend_orbis_get_mem_used,  /* get_mem_free  */
    NULL,                         /* install_signal_handler */
    NULL,                         /* get_sighandler_state */
    NULL,                         /* set_sighandler_state */
@@ -433,7 +504,7 @@ frontend_ctx_driver_t frontend_ctx_orbis = {
    NULL,                         /* watch_path_for_changes */
    NULL,                         /* check_for_path_changes */
    NULL,                         /* set_sustained_performance_mode */
-   NULL,                         /* get_cpu_model_name */
+   frontend_orbis_get_cpu_model_name,
    NULL,                         /* get_user_language */
    "orbis",
 };

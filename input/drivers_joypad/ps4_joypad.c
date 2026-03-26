@@ -155,8 +155,57 @@ static void ps4_joypad_get_buttons(unsigned port_num, input_bits_t *state)
 
 static int16_t ps4_joypad_axis(unsigned port_num, uint32_t joyaxis)
 {
-   /* TODO/FIXME - implement */
-   return 0;
+   ScePadData buttons;
+   int16_t    val = 0;
+
+   if (port_num >= PS4_MAX_ORBISPADS)
+      return 0;
+   if (!ds_joypad_states[port_num].connected)
+      return 0;
+   if (joyaxis == AXIS_NONE)
+      return 0;
+
+   if (scePadReadState(ds_joypad_states[port_num].handle, &buttons) != 0)
+      return 0;
+
+   if (AXIS_POS_GET(joyaxis) != AXIS_DIR_NONE)
+   {
+      unsigned axis_idx = AXIS_POS_GET(joyaxis);
+      switch (axis_idx)
+      {
+         case 0:  /* Left  X */
+            val = ((int32_t)buttons.leftStick.x  - 0x80) << 8;
+            break;
+         case 1:  /* Left  Y (inverted: up = negative) */
+            val = ((int32_t)buttons.leftStick.y  - 0x80) << 8;
+            break;
+         case 2:  /* Right X */
+            val = ((int32_t)buttons.rightStick.x - 0x80) << 8;
+            break;
+         case 3:  /* Right Y */
+            val = ((int32_t)buttons.rightStick.y - 0x80) << 8;
+            break;
+         default: break;
+      }
+      if (val < 0)
+         val = 0;
+   }
+   else if (AXIS_NEG_GET(joyaxis) != AXIS_DIR_NONE)
+   {
+      unsigned axis_idx = AXIS_NEG_GET(joyaxis);
+      switch (axis_idx)
+      {
+         case 0:  val = ((int32_t)buttons.leftStick.x  - 0x80) << 8; break;
+         case 1:  val = ((int32_t)buttons.leftStick.y  - 0x80) << 8; break;
+         case 2:  val = ((int32_t)buttons.rightStick.x - 0x80) << 8; break;
+         case 3:  val = ((int32_t)buttons.rightStick.y - 0x80) << 8; break;
+         default: break;
+      }
+      if (val > 0)
+         val = 0;
+   }
+
+   return val;
 }
 
 static void ps4_joypad_poll(void)
@@ -211,6 +260,17 @@ static bool ps4_joypad_rumble(unsigned pad,
 
 static void ps4_joypad_destroy(void)
 {
+   unsigned i;
+   for (i = 0; i < PS4_MAX_ORBISPADS; i++)
+   {
+      if (ds_joypad_states[i].connected)
+      {
+         scePadClose(ds_joypad_states[i].handle);
+         ds_joypad_states[i].connected = false;
+         ds_joypad_states[i].handle    = 0;
+      }
+   }
+   num_players = 0;
 }
 
 input_device_driver_t ps4_joypad = {

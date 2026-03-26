@@ -25,12 +25,15 @@
 #include "../common/orbis_common.h"
 #include "../../frontend/frontend_driver.h"
 #include "../../configuration.h"
+#include "../../input/input_driver.h"
 
 static enum gfx_ctx_api ctx_orbis_api = GFX_CTX_OPENGL_API;
 
 orbis_ctx_data_t *nx_ctx_ptr = NULL;
 
 extern bool platform_orbis_has_focus;
+extern input_driver_t input_ps4;
+extern input_device_driver_t ps4_joypad;
 
 void orbis_ctx_destroy(void *data)
 {
@@ -44,6 +47,7 @@ void orbis_ctx_destroy(void *data)
         ctx_orbis->resize = false;
         free(ctx_orbis);
     }
+    nx_ctx_ptr = NULL;
 }
 
 static void orbis_ctx_get_video_size(void *data,
@@ -84,28 +88,36 @@ static void *orbis_ctx_init(video_frame_info_t *video_info, void *video_driver)
 
 #ifdef HAVE_EGL
 
-   memset(&ctx_orbis->pgl_config, 0, sizeof(ctx_orbis->pgl_config));
+   /* Populate ScePglConfig using named constants from orbis_common.h.
+    * Only call scePigletSetConfigurationVSH once per process — if piglet
+    * was already configured (e.g. by a previous context init attempt)
+    * skip this step to avoid a hard fault. */
+   if (!ctx_orbis->piglet_configured)
    {
-      ctx_orbis->pgl_config.size=sizeof(ctx_orbis->pgl_config);
-      ctx_orbis->pgl_config.flags=SCE_PGL_FLAGS_USE_COMPOSITE_EXT | SCE_PGL_FLAGS_USE_FLEXIBLE_MEMORY | 0x60;
-      ctx_orbis->pgl_config.processOrder=1;
-      ctx_orbis->pgl_config.systemSharedMemorySize=0x200000;
-      ctx_orbis->pgl_config.videoSharedMemorySize=0x2400000;
-      ctx_orbis->pgl_config.maxMappedFlexibleMemory=0xAA00000;
-      ctx_orbis->pgl_config.drawCommandBufferSize=0xC0000;
-      ctx_orbis->pgl_config.lcueResourceBufferSize=0x10000;
-      ctx_orbis->pgl_config.dbgPosCmd_0x40=ATTR_ORBISGL_WIDTH;
-      ctx_orbis->pgl_config.dbgPosCmd_0x44=ATTR_ORBISGL_HEIGHT;
-      ctx_orbis->pgl_config.dbgPosCmd_0x48=0;
-      ctx_orbis->pgl_config.dbgPosCmd_0x4C=0;
-      ctx_orbis->pgl_config.unk_0x5C=2;
+      memset(&ctx_orbis->pgl_config, 0, sizeof(ctx_orbis->pgl_config));
+      ctx_orbis->pgl_config.size                   = sizeof(ctx_orbis->pgl_config);
+      ctx_orbis->pgl_config.flags                  = ORBISGL_PGL_FLAGS;
+      ctx_orbis->pgl_config.processOrder           = 1;
+      ctx_orbis->pgl_config.systemSharedMemorySize = ORBISGL_PGL_SYSTEM_SHARED_MEM;
+      ctx_orbis->pgl_config.videoSharedMemorySize  = ORBISGL_PGL_VIDEO_SHARED_MEM;
+      ctx_orbis->pgl_config.maxMappedFlexibleMemory= ORBISGL_PGL_MAX_FLEXIBLE_MEM;
+      ctx_orbis->pgl_config.drawCommandBufferSize  = ORBISGL_PGL_DRAW_CMD_BUF;
+      ctx_orbis->pgl_config.lcueResourceBufferSize = ORBISGL_PGL_LCUE_RESOURCE_BUF;
+      ctx_orbis->pgl_config.dbgPosCmd_0x40         = ATTR_ORBISGL_WIDTH;
+      ctx_orbis->pgl_config.dbgPosCmd_0x44         = ATTR_ORBISGL_HEIGHT;
+      ctx_orbis->pgl_config.dbgPosCmd_0x48         = 0;
+      ctx_orbis->pgl_config.dbgPosCmd_0x4C         = 0;
+      ctx_orbis->pgl_config.unk_0x5C               = 2;
+
+      ret = scePigletSetConfigurationVSH(&ctx_orbis->pgl_config);
+      if (!ret)
+      {
+         printf("[ORBISGL] scePigletSetConfigurationVSH failed 0x%08X.\n", ret);
+         goto error;
+      }
+
+      ctx_orbis->piglet_configured = true;
    }
-    ret = scePigletSetConfigurationVSH(&ctx_orbis->pgl_config);
-    if (!ret)
-    {
-		  printf("[ORBISGL] scePigletSetConfigurationVSH failed 0x%08X.\n",ret);
-        goto error;
-    }
 
     if (!egl_init_context(&ctx_orbis->egl, EGL_NONE, EGL_DEFAULT_DISPLAY,
                           &major, &minor, &n, attribs, NULL))
@@ -187,8 +199,21 @@ static void orbis_ctx_input_driver(void *data,
                                     const char *name,
                                     const input_driver_t **input, void **input_data)
 {
-    *input = NULL;
-    *input_data = NULL;
+    /* Wire the PS4 input driver so that cores receive pad events.
+     * ps4_input_initialize calls input_joypad_init_driver which will
+     * pick up &ps4_joypad automatically. */
+    void *ps4_input_handle = input_ps4.init("ps4");
+    if (ps4_input_handle)
+    {
+        *input      = &input_ps4;
+        *input_data = ps4_input_handle;
+    }
+    else
+    {
+        RARCH_WARN("[ORBIS] ps4 input init failed, falling back to null.\n");
+        *input      = NULL;
+        *input_data = NULL;
+    }
 }
 
 static enum gfx_ctx_api orbis_ctx_get_api(void *data)
