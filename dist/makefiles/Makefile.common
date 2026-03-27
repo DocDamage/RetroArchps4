@@ -144,7 +144,7 @@ endif
 GIT_VERSION := $(shell git rev-parse --short HEAD 2>/dev/null)
 ifneq ($(GIT_VERSION),)
    DEFINES += -DHAVE_GIT_VERSION -DGIT_VERSION=$(GIT_VERSION)
-   OBJ += core/version_git.o
+   OBJ += version_git.o
 endif
 
 # General object files
@@ -154,9 +154,9 @@ endif
 
 OBJ += frontend/frontend_driver.o \
        frontend/drivers/platform_null.o \
-       core/retroarch.o \
-       core/paths.o \
-       core/msg_hash.o \
+       retroarch.o \
+       paths.o \
+       msg_hash.o \
        intl/msg_hash_us.o \
        $(LIBRETRO_COMM_DIR)/queues/task_queue.o \
        tasks/task_content.o \
@@ -181,7 +181,7 @@ OBJ += frontend/frontend_driver.o \
        $(LIBRETRO_COMM_DIR)/lists/string_list.o \
        $(LIBRETRO_COMM_DIR)/string/stdstring.o \
        $(LIBRETRO_COMM_DIR)/memmap/memalign.o \
-       core/list_special.o \
+       list_special.o \
        $(LIBRETRO_COMM_DIR)/file/nbio/nbio_stdio.o
 
 ifneq ($(findstring Linux,$(OS)),)
@@ -203,8 +203,8 @@ endif
 OBJ += \
        $(LIBRETRO_COMM_DIR)/file/nbio/nbio_intf.o \
        $(LIBRETRO_COMM_DIR)/file/file_path.o \
-       core/file_path_special.o \
-       core/file_path_str.o \
+       file_path_special.o \
+       file_path_str.o \
        $(LIBRETRO_COMM_DIR)/hash/rhash.o \
        input/common/input_hid_common.o \
        input/input_mapper.o \
@@ -213,7 +213,7 @@ OBJ += \
        gfx/video_coord_array.o \
        gfx/video_display_server.o \
        gfx/video_crt_switch.o \
-       core/configuration.o \
+       configuration.o \
        $(LIBRETRO_COMM_DIR)/dynamic/dylib.o \
        cores/dynamic_dummy.o \
        $(LIBRETRO_COMM_DIR)/queues/message_queue.o \
@@ -227,10 +227,10 @@ OBJ += \
        $(LIBRETRO_COMM_DIR)/compat/compat_fnmatch.o \
        $(LIBRETRO_COMM_DIR)/compat/compat_posix_string.o \
        managers/cheat_manager.o \
-       core/core_info.o \
+       core_info.o \
        $(LIBRETRO_COMM_DIR)/file/config_file.o \
        $(LIBRETRO_COMM_DIR)/file/config_file_userdata.o \
-       core/runtime_file.o \
+       runtime_file.o \
        tasks/task_screenshot.o \
        tasks/task_powerstate.o \
        $(LIBRETRO_COMM_DIR)/gfx/scaler/scaler.o \
@@ -254,11 +254,11 @@ OBJ += \
        input/drivers/nullinput.o \
        input/drivers_hid/null_hid.o \
        input/drivers_joypad/null_joypad.o \
-       core/playlist.o \
+       playlist.o \
        record/drivers/record_null.o \
        $(LIBRETRO_COMM_DIR)/features/features_cpu.o \
-       core/performance_counters.o \
-       core/verbosity.o \
+       performance_counters.o \
+       verbosity.o \
        midi/drivers/null_midi.o
 
 
@@ -271,8 +271,8 @@ endif
 
 ifeq ($(HAVE_RUNAHEAD), 1)
    DEFINES += -DHAVE_RUNAHEAD
-   OBJ += core/runahead/mem_util.o \
-          core/runahead/mylist.o
+   OBJ += runahead/mem_util.o \
+          runahead/mylist.o
 endif
 
 ifeq ($(HAVE_CC_RESAMPLER), 1)
@@ -434,7 +434,7 @@ ifeq ($(HAVE_LIBRETRODB), 1)
           libretro-db/query.o \
           libretro-db/rmsgpack.o \
           libretro-db/rmsgpack_dom.o \
-          core/database_info.o \
+          database_info.o \
           tasks/task_database.o \
           tasks/task_database_cue.o
 endif

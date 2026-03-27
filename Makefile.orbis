@@ -157,7 +157,7 @@ LD      := $(PREFIX)ld.lld
 
 CLANG_RESOURCE_DIR := $(shell $(CC) -print-resource-dir 2>$(NULL_DEVICE))
 
-INCDIRS := -I. -Icore -Ideps/libz -Ideps/7zip -Ilibretro-common/include -Ideps/stb -Ilibretro-common/include/compat/zlib
+INCDIRS := -I. -Icore -Ideps -Ideps/libz -Ideps/7zip -Ilibretro-common/include -Ideps/stb -Ilibretro-common/include/compat/zlib
 ifneq ($(strip $(ORBIS_CXX_INCLUDE_ROOT)),)
 INCDIRS += -I$(ORBIS_CXX_INCLUDE_ROOT)
 endif
@@ -255,8 +255,8 @@ else
 	CFLAGS += $(DEF_FLAGS)
 	BLACKLIST :=
 	OBJ := $(filter-out $(BLACKLIST),$(OBJ))
-	ifeq ($(filter core/version_git.o,$(OBJ)),)
-		OBJ += core/version_git.o
+	ifeq ($(filter version_git.o,$(OBJ)),)
+		OBJ += version_git.o
 	endif
 endif
 

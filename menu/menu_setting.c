@@ -53,7 +53,7 @@
 #endif
 
 #ifdef HAVE_CHEEVOS
-#include "../cheevos-new/cheevos.h"
+#include "../cheevos/cheevos.h"
 #endif
 
 #include "../frontend/frontend_driver.h"
