@@ -15,8 +15,10 @@
  */
 
 #include <stdlib.h>
+#include <string.h>
 
 #include <compat/strl.h>
+#include <string/stdstring.h>
 
 #ifdef HAVE_CONFIG_H
 #include "../../config.h"
@@ -26,10 +28,11 @@
 #include "../../frontend/frontend_driver.h"
 #include "../../configuration.h"
 #include "../../input/input_driver.h"
+#include "../../verbosity.h"
 
 static enum gfx_ctx_api ctx_orbis_api = GFX_CTX_OPENGL_API;
 
-orbis_ctx_data_t *nx_ctx_ptr = NULL;
+orbis_ctx_data_t *orbis_ctx_ptr = NULL;
 
 extern bool platform_orbis_has_focus;
 extern input_driver_t input_ps4;
@@ -47,16 +50,26 @@ void orbis_ctx_destroy(void *data)
         ctx_orbis->resize = false;
         free(ctx_orbis);
     }
-    nx_ctx_ptr = NULL;
+    orbis_ctx_ptr = NULL;
 }
 
 static void orbis_ctx_get_video_size(void *data,
                                       unsigned *width, unsigned *height)
 {
     orbis_ctx_data_t *ctx_orbis = (orbis_ctx_data_t *)data;
+    unsigned video_width = ATTR_ORBISGL_WIDTH;
+    unsigned video_height = ATTR_ORBISGL_HEIGHT;
 
-    *width = ATTR_ORBISGL_WIDTH;
-    *height = ATTR_ORBISGL_HEIGHT;
+    if (ctx_orbis && ctx_orbis->width && ctx_orbis->height)
+    {
+       video_width  = ctx_orbis->width;
+       video_height = ctx_orbis->height;
+    }
+
+    if (width)
+       *width = video_width;
+    if (height)
+       *height = video_height;
 }
 
 static void *orbis_ctx_init(video_frame_info_t *video_info, void *video_driver)
@@ -79,12 +92,15 @@ static void *orbis_ctx_init(video_frame_info_t *video_info, void *video_driver)
          EGL_NONE};
 #endif
 
+    (void)video_info;
+    (void)video_driver;
+
     orbis_ctx_data_t *ctx_orbis = (orbis_ctx_data_t *)calloc(1, sizeof(*ctx_orbis));
 
     if (!ctx_orbis)
         return NULL;
 
-    nx_ctx_ptr = ctx_orbis;
+    orbis_ctx_ptr = ctx_orbis;
 
 #ifdef HAVE_EGL
 
@@ -110,7 +126,7 @@ static void *orbis_ctx_init(video_frame_info_t *video_info, void *video_driver)
       ctx_orbis->pgl_config.unk_0x5C               = 2;
 
       ret = scePigletSetConfigurationVSH(&ctx_orbis->pgl_config);
-      if (!ret)
+      if (ret != 0)
       {
          printf("[ORBISGL] scePigletSetConfigurationVSH failed 0x%08X.\n", ret);
          goto error;
@@ -131,7 +147,7 @@ static void *orbis_ctx_init(video_frame_info_t *video_info, void *video_driver)
     return ctx_orbis;
 
 error:
-    orbis_ctx_destroy(video_driver);
+    orbis_ctx_destroy(ctx_orbis);
     return NULL;
 }
 
@@ -165,11 +181,16 @@ static bool orbis_ctx_set_video_mode(void *data,
 
     orbis_ctx_data_t *ctx_orbis = (orbis_ctx_data_t *)data;
 
-    ctx_orbis->width = ATTR_ORBISGL_WIDTH;
-    ctx_orbis->height = ATTR_ORBISGL_HEIGHT;
+    (void)video_info;
+    (void)fullscreen;
 
-    ctx_orbis->native_window.width = ctx_orbis->width;
-    ctx_orbis->native_window.height = ctx_orbis->height;
+    ctx_orbis->width = width ? width : ATTR_ORBISGL_WIDTH;
+    ctx_orbis->height = height ? height : ATTR_ORBISGL_HEIGHT;
+
+    ctx_orbis->native_window.uID      = 0;
+    ctx_orbis->native_window.uWidth   = ctx_orbis->width;
+    ctx_orbis->native_window.uHeight  = ctx_orbis->height;
+    ctx_orbis->native_window.uPadding = 0;
 
     ctx_orbis->refresh_rate = 60;
 

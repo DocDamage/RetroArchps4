@@ -62,8 +62,8 @@
 #  endif
 #  include <unistd.h>
 #  if defined(ORBIS)
-#  include <sys/fcntl.h>
-#  include <sys/dirent.h>
+#  include <fcntl.h>
+#  include <dirent.h>
 #  include <orbisFile.h>
 #  endif
 #endif
@@ -86,9 +86,11 @@
 #  include <psp2/io/stat.h>
 #elif defined(ORBIS)
 #  include <orbisFile.h>
-#  include <ps4link.h>
-#  include <sys/dirent.h>
-#  include <sys/fcntl.h>
+#  include <dirent.h>
+#  include <fcntl.h>
+#  ifdef HAVE_PS4LINK
+#    include <ps4link.h>
+#  endif
 #elif !defined(_WIN32)
 #  if defined(PSP)
 #    include <pspiofilemgr.h>
@@ -139,8 +141,8 @@
 
 #if defined(ORBIS)
 #include <orbisFile.h>
-#include <sys/fcntl.h>
-#include <sys/dirent.h>
+#include <fcntl.h>
+#include <dirent.h>
 #endif
 #if defined(PSP)
 #include <pspkernel.h>
@@ -894,19 +896,27 @@ int retro_vfs_stat_impl(const char *path, int32_t *size)
 
 #elif defined(ORBIS)
    /* Orbis */
-   bool is_dir, is_character_special;
+   struct stat buf;
+   bool is_dir               = false;
+   bool is_character_special = false;
    int dir_ret;
 
    if (!path || !*path)
       return 0;
 
+   if (stat(path, &buf) < 0)
+   {
+      dir_ret = orbisDopen(path);
+      if (dir_ret < 0)
+         return 0;
+      orbisDclose(dir_ret);
+      return RETRO_VFS_STAT_IS_VALID | RETRO_VFS_STAT_IS_DIRECTORY;
+   }
+
    if (size)
       *size = (int32_t)buf.st_size;
 
-   dir_ret = orbisDopen(path);
-   is_dir  = dir_ret > 0;
-   orbisDclose(dir_ret);
-
+   is_dir = S_ISDIR(buf.st_mode);
    is_character_special = S_ISCHR(buf.st_mode);
 
    return RETRO_VFS_STAT_IS_VALID | (is_dir ? RETRO_VFS_STAT_IS_DIRECTORY : 0) | (is_character_special ? RETRO_VFS_STAT_IS_CHARACTER_SPECIAL : 0);

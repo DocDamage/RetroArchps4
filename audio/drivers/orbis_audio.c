@@ -77,6 +77,7 @@ typedef struct
    int   port;        /* orbisAudio port handle */
    bool  alive;
    bool  nonblocking;
+   size_t buffered_frames; /* queued frames waiting for a full output block */
 
    /* Conversion staging buffer (holds one full block in float) */
    float  float_buf[ORBIS_AUDIO_BLOCK_SAMPLES * ORBIS_AUDIO_CHANNELS];
@@ -89,6 +90,7 @@ static void *orbis_audio_init(const char *device,
 {
    orbis_audio_t *oa;
    int port;
+   int ret;
 
    (void)device;
    (void)latency;
@@ -98,9 +100,10 @@ static void *orbis_audio_init(const char *device,
    if (new_rate)
       *new_rate = 48000;
 
-   if (orbisAudioInit() < 0)
+   ret = orbisAudioInit();
+   if (ret < 0)
    {
-      RARCH_ERR("[orbis_audio] orbisAudioInit() failed.\n");
+      RARCH_ERR("[orbis_audio] orbisAudioInit() failed: 0x%08X\n", ret);
       return NULL;
    }
 
@@ -134,6 +137,7 @@ static ssize_t orbis_audio_write(void *data, const void *buf, size_t size)
    orbis_audio_t *oa = (orbis_audio_t *)data;
    const float   *src;
    size_t         frames_in;
+   size_t         frames_written = 0;
    int            ret;
 
    if (!oa || !oa->alive)
@@ -142,45 +146,53 @@ static ssize_t orbis_audio_write(void *data, const void *buf, size_t size)
    if (oa->nonblocking)
       return (ssize_t)size;   /* fast-forward: accept but discard */
 
-   /* RetroArch passes interleaved float samples (L R L R …).
-    * We convert a full block at a time and submit to orbisAudio. */
+   /* RetroArch passes interleaved float samples (L R L R …). */
    src       = (const float *)buf;
    frames_in = size / (ORBIS_AUDIO_CHANNELS * sizeof(float));
    if (frames_in == 0)
       return 0;
 
-   /* Clamp to one block — the caller will loop for larger buffers */
-   if (frames_in > ORBIS_AUDIO_BLOCK_SAMPLES)
-      frames_in = ORBIS_AUDIO_BLOCK_SAMPLES;
-
-   convert_float_to_s16(oa->pcm_buf, src,
-                        frames_in * ORBIS_AUDIO_CHANNELS);
-
-   /* Zero-pad the tail of the block if the caller supplied fewer frames */
-   if (frames_in < ORBIS_AUDIO_BLOCK_SAMPLES)
+   while (frames_in > 0)
    {
-      size_t pad_start = frames_in * ORBIS_AUDIO_CHANNELS;
-      size_t pad_count = (ORBIS_AUDIO_BLOCK_SAMPLES - frames_in)
-                         * ORBIS_AUDIO_CHANNELS;
-      memset(oa->pcm_buf + pad_start, 0, pad_count * sizeof(int16_t));
+      size_t frames_free = ORBIS_AUDIO_BLOCK_SAMPLES - oa->buffered_frames;
+      size_t frames_copy = frames_in < frames_free ? frames_in : frames_free;
+
+      memcpy(&oa->float_buf[oa->buffered_frames * ORBIS_AUDIO_CHANNELS],
+             &src[frames_written * ORBIS_AUDIO_CHANNELS],
+             frames_copy * ORBIS_AUDIO_CHANNELS * sizeof(float));
+
+      oa->buffered_frames += frames_copy;
+      frames_written      += frames_copy;
+      frames_in           -= frames_copy;
+
+      if (oa->buffered_frames == ORBIS_AUDIO_BLOCK_SAMPLES)
+      {
+         convert_float_to_s16(oa->pcm_buf, oa->float_buf,
+               ORBIS_AUDIO_BLOCK_SAMPLES * ORBIS_AUDIO_CHANNELS);
+
+         ret = orbisAudioOutput(oa->port, ORBIS_AUDIO_VOLUME_0DB,
+               ORBIS_AUDIO_VOLUME_0DB, oa->pcm_buf);
+         if (ret < 0)
+         {
+            RARCH_ERR("[orbis_audio] orbisAudioOutput failed: 0x%08X\n", ret);
+            return -1;
+         }
+
+         oa->buffered_frames = 0;
+      }
    }
 
-   ret = orbisAudioOutput(oa->port, ORBIS_AUDIO_VOLUME_0DB,
-                          ORBIS_AUDIO_VOLUME_0DB, oa->pcm_buf);
-   if (ret < 0)
-   {
-      RARCH_ERR("[orbis_audio] orbisAudioOutput failed: 0x%08X\n", ret);
-      return -1;
-   }
-
-   return (ssize_t)(frames_in * ORBIS_AUDIO_CHANNELS * sizeof(float));
+   return (ssize_t)(frames_written * ORBIS_AUDIO_CHANNELS * sizeof(float));
 }
 
 static bool orbis_audio_stop(void *data)
 {
    orbis_audio_t *oa = (orbis_audio_t *)data;
    if (oa)
+   {
       oa->alive = false;
+      oa->buffered_frames = 0;
+   }
    return true;
 }
 
@@ -204,7 +216,11 @@ static void orbis_audio_set_nonblock_state(void *data, bool toggle)
 {
    orbis_audio_t *oa = (orbis_audio_t *)data;
    if (oa)
+   {
       oa->nonblocking = toggle;
+      if (toggle)
+         oa->buffered_frames = 0;
+   }
 }
 
 static void orbis_audio_free(void *data)
@@ -227,9 +243,18 @@ static bool orbis_audio_use_float(void *data)
 
 static size_t orbis_audio_write_avail(void *data)
 {
-   (void)data;
-   /* We always accept exactly one block's worth of float samples. */
-   return ORBIS_AUDIO_BLOCK_SAMPLES * ORBIS_AUDIO_CHANNELS * sizeof(float);
+   orbis_audio_t *oa = (orbis_audio_t *)data;
+   size_t frames_free;
+
+   if (!oa)
+      return 0;
+
+   if (oa->buffered_frames < ORBIS_AUDIO_BLOCK_SAMPLES)
+      frames_free = ORBIS_AUDIO_BLOCK_SAMPLES - oa->buffered_frames;
+   else
+      frames_free = 0;
+
+   return frames_free * ORBIS_AUDIO_CHANNELS * sizeof(float);
 }
 
 #endif /* HAVE_ORBIS_AUDIO */

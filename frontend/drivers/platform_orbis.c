@@ -27,20 +27,20 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include <kernel.h>
-#include <systemservice.h>
-#include <orbis2d.h>
-#include <orbisPad.h>
-#include <orbisAudio.h>
-#include <modplayer.h>
+#include <libkernel.h>
+#include <SystemService.h>
 #ifdef HAVE_PS4LINK
 #include <ps4link.h>
 #endif
-#include <orbisKeyboard.h>
 #ifdef HAVE_DEBUGNET
 #include <debugnet.h>
 #endif
 #include <orbisFile.h>
+
+typedef struct Orbis2dConfig Orbis2dConfig;
+typedef struct OrbisPadConfig OrbisPadConfig;
+typedef struct OrbisAudioConfig OrbisAudioConfig;
+typedef struct OrbisKeyboardConfig OrbisKeyboardConfig;
 
 #include <pthread.h>
 
@@ -55,6 +55,7 @@
 #include "../../menu/menu_driver.h"
 #endif
 
+#include "../frontend.h"
 #include "../frontend_driver.h"
 #include "../../defaults.h"
 #include "../../file_path_special.h"
@@ -108,15 +109,6 @@ static void frontend_orbis_attach_runtime_conf(int argc, char *argv[])
 #endif
 }
 
-#ifdef __cplusplus
-extern "C"
-#endif
-int main(int argc, char *argv[])
-{
-   sceSystemServiceHideSplashScreen();
-   return rarch_main(argc, argv, NULL);
-}
-
 static void frontend_orbis_get_environment_settings(int *argc, char *argv[],
       void *args, void *params_data)
 {
@@ -142,11 +134,7 @@ static void frontend_orbis_get_environment_settings(int *argc, char *argv[],
 
    orbisFileInit();
 
-   if (myConf && myConf->confPad)
-   {
-      orbisPadInitWithConf(myConf->confPad);
-      scePadClose(myConf->confPad->padHandle);
-   }
+   /* Pad lifecycle is owned by ps4_joypad_init()/destroy(). */
 
    strlcpy(eboot_path, "host0:app", sizeof(eboot_path));
    strlcpy(g_defaults.dirs[DEFAULT_DIR_PORT], eboot_path, sizeof(g_defaults.dirs[DEFAULT_DIR_PORT]));

@@ -2,7 +2,26 @@
 #define ORBIS_COMMON_H__
 
 #ifdef HAVE_EGL
+#include <stdbool.h>
+#if defined(__has_include)
+#if __has_include(<piglet.h>)
 #include <piglet.h>
+#elif __has_include(<Pigletv2VSH.h>)
+#include <Pigletv2VSH.h>
+#else
+#error "No Piglet header found for ORBIS EGL context."
+#endif
+#else
+#include <piglet.h>
+#endif
+
+#if defined(ORBIS_PGL_MAX_PROCESS_ORDER) && !defined(SCE_PGL_MAX_PROCESS_ORDER)
+typedef OrbisPglConfig ScePglConfig;
+typedef OrbisPglWindow SceWindow;
+#define SCE_PGL_FLAGS_USE_COMPOSITE_EXT ORBIS_PGL_FLAGS_USE_COMPOSITE_EXT
+#define SCE_PGL_FLAGS_USE_FLEXIBLE_MEMORY ORBIS_PGL_FLAGS_USE_FLEXIBLE_MEMORY
+#endif
+
 #include "../common/egl_common.h"
 #endif
 

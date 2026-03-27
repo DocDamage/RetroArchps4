@@ -33,7 +33,7 @@
 #include "../libretro-common/compat/compat_snprintf.c"
 #endif
 
-#include "../verbosity.c"
+#include "../core/verbosity.c"
 
 #if defined(HAVE_LOGGER) && !defined(ANDROID)
 #include "../network/net_logger.c"
@@ -76,16 +76,16 @@ CONSOLE EXTENSIONS
 #endif
 
 #ifdef INTERNAL_LIBOGC
-#include "../wii/libogc/libfat/cache.c"
-#include "../wii/libogc/libfat/directory.c"
-#include "../wii/libogc/libfat/disc.c"
-#include "../wii/libogc/libfat/fatdir.c"
-#include "../wii/libogc/libfat/fatfile.c"
-#include "../wii/libogc/libfat/file_allocation_table.c"
-#include "../wii/libogc/libfat/filetime.c"
-#include "../wii/libogc/libfat/libfat.c"
-#include "../wii/libogc/libfat/lock.c"
-#include "../wii/libogc/libfat/partition.c"
+#include "../platforms/wii/libogc/libfat/cache.c"
+#include "../platforms/wii/libogc/libfat/directory.c"
+#include "../platforms/wii/libogc/libfat/disc.c"
+#include "../platforms/wii/libogc/libfat/fatdir.c"
+#include "../platforms/wii/libogc/libfat/fatfile.c"
+#include "../platforms/wii/libogc/libfat/file_allocation_table.c"
+#include "../platforms/wii/libogc/libfat/filetime.c"
+#include "../platforms/wii/libogc/libfat/libfat.c"
+#include "../platforms/wii/libogc/libfat/lock.c"
+#include "../platforms/wii/libogc/libfat/partition.c"
 #endif
 
 #endif
@@ -128,7 +128,7 @@ ENCODINGS
 PERFORMANCE
 ============================================================ */
 #include "../libretro-common/features/features_cpu.c"
-#include "../performance_counters.c"
+#include "../core/performance_counters.c"
 
 /*============================================================
 CONFIG FILE
@@ -145,7 +145,7 @@ CONFIG FILE
 /*============================================================
 RUNTIME FILE
 ============================================================ */
-#include "../runtime_file.c"
+#include "../core/runtime_file.c"
 
 /*============================================================
 ACHIEVEMENTS
@@ -158,11 +158,11 @@ ACHIEVEMENTS
 #include "../libretro-common/formats/json/jsonsax.c"
 #include "../network/net_http_special.c"
 
-#include "../cheevos-new/cheevos.c"
-#include "../cheevos-new/badges.c"
-#include "../cheevos-new/fixup.c"
-#include "../cheevos-new/hash.c"
-#include "../cheevos-new/parser.c"
+#include "../cheevos/cheevos.c"
+#include "../cheevos/badges.c"
+#include "../cheevos/fixup.c"
+#include "../cheevos/hash.c"
+#include "../cheevos/parser.c"
 
 #include "../deps/rcheevos/src/rcheevos/alloc.c"
 #include "../deps/rcheevos/src/rcheevos/condition.c"
@@ -957,8 +957,8 @@ CORES
 FILE
 ============================================================ */
 #include "../libretro-common/file/file_path.c"
-#include "../file_path_special.c"
-#include "../file_path_str.c"
+#include "../core/file_path_special.c"
+#include "../core/file_path_str.c"
 #include "../libretro-common/lists/dir_list.c"
 #include "../libretro-common/lists/string_list.c"
 #include "../libretro-common/lists/file_list.c"
@@ -977,7 +977,7 @@ FILE
 #include "../libretro-common/media/media_detect_cd.c"
 #endif
 
-#include "../list_special.c"
+#include "../core/list_special.c"
 #include "../libretro-common/string/stdstring.c"
 #include "../libretro-common/file/nbio/nbio_stdio.c"
 #if defined(__linux__)
@@ -1002,7 +1002,7 @@ MESSAGE
 /*============================================================
 CONFIGURATION
 ============================================================ */
-#include "../configuration.c"
+#include "../core/configuration.c"
 
 /*============================================================
 STATE MANAGER
@@ -1057,7 +1057,7 @@ FRONTEND
 #endif
 #include "../frontend/drivers/platform_null.c"
 
-#include "../core_info.c"
+#include "../core/core_info.c"
 
 /*============================================================
 UI
@@ -1075,17 +1075,17 @@ GIT
 ============================================================ */
 
 #ifdef HAVE_GIT_VERSION
-#include "../version_git.c"
+#include "../core/version_git.c"
 #endif
 
 /*============================================================
 RETROARCH
 ============================================================ */
-#include "../retroarch.c"
-#include "../paths.c"
+#include "../core/retroarch.c"
+#include "../core/paths.c"
 #include "../libretro-common/queues/task_queue.c"
 
-#include "../msg_hash.c"
+#include "../core/msg_hash.c"
 #ifdef HAVE_LANGEXTRA
 #include "../intl/msg_hash_de.c"
 #include "../intl/msg_hash_es.c"
@@ -1221,7 +1221,7 @@ SCREENSHOTS
 /*============================================================
 PLAYLISTS
 ============================================================ */
-#include "../playlist.c"
+#include "../core/playlist.c"
 
 /*============================================================
 MENU
@@ -1503,7 +1503,7 @@ XML
 #include "../libretro-db/rmsgpack.c"
 #include "../libretro-db/rmsgpack_dom.c"
 #include "../libretro-db/query.c"
-#include "../database_info.c"
+#include "../core/database_info.c"
 #endif
 
 #if defined(HAVE_BUILTINMINIUPNPC)
