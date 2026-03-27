@@ -1,39 +1,36 @@
 # Orbis validation toolchain
 
-This toolchain is for validating the PS4/Orbis build environment and running a repeatable build matrix on a real machine that has access to the target SDK/toolchain.
+A local validation harness for running repeatable build-matrix tests on a machine that has
+the PS4 SDK and toolchain available.
 
 ## What it solves
 
-The repo changes can be reviewed in GitHub, but real validation still has to happen on a machine that actually has:
+Code review can happen in GitHub, but real validation requires a machine that has:
 
-- a usable `ORBISDEV` or `PS4SDK`
+- `ORBISDEV`, `PS4SDK`, or `OO_PS4_TOOLCHAIN` set in the environment
 - `make` or `mingw32-make`
-- `clang`
-- the expected Orbis stub libraries and headers
+- `clang` with `ld.lld`
+- The expected Orbis stub libraries and headers
 
-This toolchain gives you a standard way to collect that information and produce logs that can be reviewed later.
+This toolchain gives you a standard way to collect that information and produce logs that
+can be reviewed later.
 
 ## Files
 
-- `tools/orbis/Get-OrbisEnvReport.ps1`
-- `tools/orbis/Invoke-OrbisBuildMatrix.ps1`
+- `tools/orbis/Get-OrbisEnvReport.ps1` — environment probe
+- `tools/orbis/Invoke-OrbisBuildMatrix.ps1` — build matrix runner
 
 ## 1. Environment probe
 
-This script inspects:
+Inspects and reports:
 
-- repo root
-- current branch and commit
-- `git`, `make`, `mingw32-make`, `clang`, `pwsh`, `powershell`
-- SDK root source (`ORBISDEV` vs `PS4SDK`)
-- modern vs legacy SDK layout
-- include root
-- platform include root
-- C++ include root when present
-- lib root
-- crt file
-- linker script
-- presence of important libraries/stubs
+- Repo root, current branch and commit
+- Tool availability: `git`, `make`, `mingw32-make`, `clang`, `pwsh`, `powershell`
+- SDK root source (`ORBISDEV` / `PS4SDK` / `OO_PS4_TOOLCHAIN`)
+- SDK layout (modern vs legacy)
+- Include root, platform include root, C++ include root
+- Lib root, CRT file, linker script
+- Presence of key libraries and stubs
 
 ### Usage
 
@@ -49,107 +46,104 @@ pwsh ./tools/orbis/Get-OrbisEnvReport.ps1 -OutputPath ./artifacts/orbis_env_repo
 
 ## 2. Build matrix runner
 
-This script runs a repeatable build matrix and writes logs + summary files.
+Runs a repeatable build matrix and writes per-profile logs plus a summary.
 
-By default it runs:
+Default matrix: `full` and `lite`. Options:
 
-- `full`
-- `lite`
+- `-IncludeDev` — also build `dev`
+- `-EnableKeyboard` / `-EnableMouse` — probe optional input stubs
+- `-SkipBuild` — collect env info only, do not compile
+- `-MakeCommand` — override the make binary (default: `make`)
 
-You can optionally include:
-
-- `dev`
-
-You can also optionally test:
-
-- `ORBIS_ENABLE_KEYBOARD=1`
-- `ORBIS_ENABLE_MOUSE=1`
-
-### Usage
-
-Default matrix:
+### Examples
 
 ```powershell
+# Default matrix (full + lite, ORBIS_ENABLE_AUDIO=0 to avoid liborbisAudio dependency)
 pwsh ./tools/orbis/Invoke-OrbisBuildMatrix.ps1
-```
 
-Use `mingw32-make` explicitly:
-
-```powershell
+# Explicit make command on Windows
 pwsh ./tools/orbis/Invoke-OrbisBuildMatrix.ps1 -MakeCommand mingw32-make
-```
 
-Include the `dev` profile too:
-
-```powershell
+# Include dev profile
 pwsh ./tools/orbis/Invoke-OrbisBuildMatrix.ps1 -IncludeDev
-```
 
-Probe keyboard/mouse toggles:
-
-```powershell
+# Probe keyboard/mouse stubs
 pwsh ./tools/orbis/Invoke-OrbisBuildMatrix.ps1 -EnableKeyboard -EnableMouse
-```
 
-Collect info only without building:
-
-```powershell
+# Environment report only
 pwsh ./tools/orbis/Invoke-OrbisBuildMatrix.ps1 -SkipBuild
 ```
 
 ## Output
 
-By default artifacts are written under:
+Artifacts are written under:
 
 ```text
 artifacts/orbis_validation/<timestamp>/
 ```
 
-Typical output includes:
+Typical output:
 
-- `env_report.json`
-- `summary.json`
-- `summary.md`
-- per-profile log files such as:
-  - `full/info.log`
-  - `full/build.log`
-  - `full/stripped.log`
-  - `lite/info.log`
-  - `lite/build.log`
-  - `lite/stripped.log`
+```text
+env_report.json
+summary.json
+summary.md
+full/info.log
+full/build.log
+full/stripped.log
+lite/info.log
+lite/build.log
+lite/stripped.log
+```
+
+## Audio note
+
+`full` and `dev` profiles default to `ORBIS_ENABLE_AUDIO=1`, which requires `liborbisAudio`.
+Until that library is installed, pass `ORBIS_ENABLE_AUDIO=0` to avoid a link failure:
+
+```powershell
+pwsh ./tools/orbis/Invoke-OrbisBuildMatrix.ps1 -MakeCommand mingw32-make `
+  -ExtraArgs "ORBIS_ENABLE_AUDIO=0"
+```
+
+Or build `lite` only, which disables audio unconditionally.
 
 ## Recommended validation sequence
 
-### Legacy SDK path
+### OpenOrbis (Windows)
+
+```powershell
+$env:OO_PS4_TOOLCHAIN = 'D:\OpenOrbis_v0.5.4\OpenOrbis\PS4Toolchain'
+pwsh ./tools/orbis/Invoke-OrbisBuildMatrix.ps1 -MakeCommand mingw32-make
+```
+
+### Legacy PS4SDK path
 
 ```powershell
 $env:PS4SDK = 'C:\path\to\ps4sdk'
 pwsh ./tools/orbis/Invoke-OrbisBuildMatrix.ps1 -MakeCommand mingw32-make
 ```
 
-### Modern ORBISDEV path
+### Optional toggles pass
 
 ```powershell
-$env:ORBISDEV = 'C:\path\to\orbisdev'
-pwsh ./tools/orbis/Invoke-OrbisBuildMatrix.ps1 -MakeCommand mingw32-make
+pwsh ./tools/orbis/Invoke-OrbisBuildMatrix.ps1 -MakeCommand mingw32-make `
+  -EnableKeyboard -EnableMouse
 ```
 
-### Extra pass for optional toggles
+## What to review after running
 
-```powershell
-pwsh ./tools/orbis/Invoke-OrbisBuildMatrix.ps1 -MakeCommand mingw32-make -EnableKeyboard -EnableMouse
-```
+- Whether `full` and `lite` build cleanly
+- Whether `full-stripped` and `lite-stripped` produce stripped ELFs
+- Whether the SDK layout (modern vs legacy) was detected correctly
+- Whether the linker script and C++ include root were found when expected
+- Whether keyboard/mouse stubs actually exist before enabling those toggles
+- ELF file sizes (regression indicator between passes)
 
-## What to review after running it
+## Current known baseline (OpenOrbis v0.5.4 · clang 21 · Windows 11)
 
-- whether `full` builds cleanly
-- whether `lite` builds cleanly
-- whether `full-stripped` and `lite-stripped` work
-- whether the SDK layout was detected correctly
-- whether keyboard/mouse stubs actually exist before enabling those toggles
-- whether the linker script and C++ include root were found when expected
-
-## Reality check
-
-This toolchain does not magically give this environment an Orbis SDK.
-It is a local validation harness for a real machine that has the necessary build tools.
+| Profile | Result | ELF size |
+| ------- | ------ | -------- |
+| `lite` | Clean | 2.97 MB |
+| `full ORBIS_ENABLE_AUDIO=0` | Clean | 3.0 MB |
+| `full` (audio on) | Link error — `liborbisAudio` not found | — |

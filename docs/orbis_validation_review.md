@@ -1,93 +1,119 @@
 # Orbis validation review
 
-Date: 2026-03-25
-Scope: validation pass on the post-PR Orbis cleanup branch after the initial cleanup PR had already been merged.
+**Last updated:** 2026-03-26
+**Branch:** `orbis-build-cleanup-pass1`
+
+---
 
 ## What was reviewed
 
-- `Makefile.orbis`
-- `frontend/drivers/platform_orbis.c`
-- `docs/ps4_orbis_build_profiles.md`
-- cumulative branch behavior across:
-  - `dev`, `full`, `lite`
-  - modern vs legacy SDK layout detection
-  - optional PS4Link / DebugNet toggles
-  - optional keyboard / mouse toggles
-  - stripped release targets
-  - upstream-adapted browser roots
+- `Makefile.orbis` — build system, toolchain detection, PKG pipeline
+- `frontend/drivers/platform_orbis.c` — init, dirs, mem stats, exec
+- `gfx/drivers_context/orbis_ctx.c` — EGL/Piglet context driver
+- `gfx/common/orbis_common.h` — PGL config, memory constants
+- `input/drivers_joypad/ps4_joypad.c` — DualShock 4 driver
+- `audio/drivers/orbis_audio.c` — orbisAudio driver
+- `managers/state_manager.c` — SSE2 guard
+- `libretro-common/vfs/vfs_implementation.c` — ORBIS VFS layer
+- `cores/dynamic_dummy.c` — static core stub
+- `griffin/griffin.c` — single-TU build includes
+
+---
+
+## Build results (2026-03-26)
+
+First successful compile pass on OpenOrbis v0.5.4 / LLVM clang 21 / Windows host.
+
+| Profile | Command | Result |
+| ------- | ------- | ------ |
+| `lite` | `make -f Makefile.orbis lite` | **Clean** — 2.97 MB ELF |
+| `full` (no audio) | `make -f Makefile.orbis full ORBIS_ENABLE_AUDIO=0` | **Clean** — 3.0 MB ELF |
+| `full` (with audio) | `make -f Makefile.orbis full` | **Blocked** — `liborbisAudio` not installed |
+
+---
 
 ## Findings
 
 ### 1. Profile model is coherent
 
-The branch now has a clear split between:
+The `dev` / `full` / `lite` split is meaningful and is working as intended. Each profile
+produces a different binary size and link footprint.
 
-- `dev` for console-side debugging and old workflow behavior
-- `full` for a normal release-style build
-- `lite` for a leaner frontend-focused build
+### 2. Toolchain detection is correct
 
-That split is meaningful and worth keeping.
+The makefile correctly handles all three env var names (`ORBISDEV`, `PS4SDK`,
+`OO_PS4_TOOLCHAIN`) and auto-detects modern vs legacy SDK layouts, C++ include root,
+linker script, and CRT file location.
 
-### 2. Toolchain detection is directionally good
+### 3. Audio requires an external library
 
-The branch now handles both:
+`ORBIS_ENABLE_AUDIO=1` depends on `liborbisAudio`, a separate homebrew library not
+bundled in the OpenOrbis SDK. The `full` and `dev` profiles default to audio-on and will
+fail to link until `liborbisAudio` is installed. The `lite` profile disables audio and
+builds cleanly with no external dependencies.
 
-- legacy-style `PS4SDK`
-- newer-style `ORBISDEV`
+### 4. PKG pipeline is wired but untested end-to-end
 
-and detects:
+The makefile has `fself`, `sfo`, `pkg`, `pkg-full`, `pkg-lite` targets. The `dist/pkg_orbis/`
+directory contains a GP4 project file and a pre-built `param.sfo`. The pipeline has not
+been run end-to-end in this validation pass — `create-fself` and `create-pkg` were not
+exercised. PKG packaging needs a separate test pass with the full toolchain.
 
-- include root
-- platform include root
-- C++ include root when present
-- linker script when present
-- crt file location
+### 5. Several bugs fixed during this pass
 
-This is a real improvement over the original hard-coded assumptions.
+The following items from the earlier technical debt audit were resolved before or during
+this compile pass. See [TECHNICAL_DEBT.md](TECHNICAL_DEBT.md) for the full fix table.
 
-### 3. Runtime `lite` defaults are coherent
+**From earlier audit (resolved in prior commits):**
 
-The Orbis frontend changes that make `lite` default to `rgui`, reduce overlay behavior, and stop forcing verbose startup are internally consistent with the goal of a leaner build.
+- Inverted Piglet return check — EGL context was never initializing
+- `num_players` race condition — mutex now guards all reads/writes
+- Array OOB on `ds_joypad_states` — bounds check added
+- `nx_ctx_ptr` copy-paste name — renamed to `orbis_ctx_ptr`
+- `rumble` struct uninitialized — zeroed after `scePadOpen`
 
-### 4. Upstream-adapted browser roots are safe enough
+**Found during first compile pass:**
 
-Keeping the original `host0:` roots while also adding `/`, `/data`, and `/usb0` is a reasonable additive change.
+- `cheevos-new/` → `cheevos/` rename not propagated to 12 source files
+- `-lorbisAudio` linker flag missing from `PS4_LIBS`
+- Wrong `sys/fcntl.h` / `sys/dirent.h` includes in VFS layer
+- SSE2 guard missing `__has_include` — clang rejected on PS4 target
+- `retro_get_system_av_info` called itself recursively in dynamic_dummy
+- `griffin.c` include paths pointed to defunct `core/` subdirectory
+- `xmb.c` called `sleep()` without `<unistd.h>` under `#ifdef ORBIS`
+- `<7zip/7z.h>` not found — `-Ideps` missing from include path
+- `core/` subdirectory move broke all relative `../header.h` includes — reverted
 
-### 5. One real bug was found during validation
+### 6. Remaining open issues
 
-The guarded keyboard/mouse support added in a later pass had a library-ordering bug:
+See [TECHNICAL_DEBT.md](TECHNICAL_DEBT.md) for the current open-item list. The highest
+priority remaining items are:
 
-- the makefile appended keyboard/mouse stub libs to `PS4_LIBS`
-- then later overwrote `PS4_LIBS` with the base library set
+- `check-pkg-tools` in `Makefile.orbis` does not hard-fail when tools are absent
+- `audio/drivers/orbis_audio.c` discards `orbisAudioInit` error code
+- Audio write path has no accumulation buffer for sub-block-size calls
 
-That meant the toggles would define the macros but fail to preserve the extra libs.
-
-## Fix applied in this validation pass
-
-The `PS4_LIBS` base assignment was moved ahead of the optional keyboard/mouse additions so these toggles now behave consistently:
-
-- `ORBIS_ENABLE_KEYBOARD=1`
-- `ORBIS_ENABLE_MOUSE=1`
-
-## Deliberately not validated as supported defaults
-
-The following were intentionally *not* promoted to default behavior because this older fork does not show enough compatible plumbing yet:
-
-- newer upstream memory reporting hooks
-- newer frontend driver API fields
-- newer Orbis init/runtime code paths that assume a more modern SDK environment
-
-## Branch state note
-
-The initial cleanup PR had already been merged into `master`, while later work continued on the branch. This validation pass was used to sanity-check the cumulative branch state after that point.
+---
 
 ## Recommended next steps
 
-1. Open a fresh PR from the current branch tip instead of relying on the already-merged original PR.
-2. Build-test at least these combinations:
-   - legacy SDK + `full`
-   - legacy SDK + `lite`
-   - modern SDK + `full`
-   - modern SDK + `lite`
-3. Treat keyboard/mouse toggles as experimental until a real build/test pass confirms the required stubs exist in the target SDK.
-4. Do not import more upstream Orbis runtime code until there is a clear compatibility target for the SDK/toolchain in use.
+1. **Install `liborbisAudio`** and run a clean `full` build to confirm the audio path links.
+2. **Run the PKG pipeline end-to-end:** `make pkg-lite` with `create-fself` and `create-pkg`
+   available, then verify the resulting `.pkg` installs and boots on hardware.
+3. **Add a pkg tool guard:** change `check-pkg-tools` to emit `$(error ...)` rather than
+   a warning so missing tools fail at configure time.
+4. **Test `dev` profile:** no build test has been done for the dev profile yet.
+5. **Test keyboard/mouse toggles:** treat these as experimental until a real build pass
+   with the required SDK stubs confirms they link correctly.
+6. **Hardware boot test:** the ELF has never been booted on real hardware. Any runtime
+   issues (EGL surface, audio, file access) will only surface there.
+
+---
+
+## SDK / toolchain used in this pass
+
+- **SDK:** OpenOrbis v0.5.4 (`OO_PS4_TOOLCHAIN=D:/OpenOrbis_v0.5.4/OpenOrbis/PS4Toolchain`)
+- **SDK layout:** legacy (`include/`, `lib/`)
+- **Compiler:** LLVM clang 21.1.0 (system install, `x86_64-scei-ps4-elf` target)
+- **Linker:** `ld.lld` (bundled with LLVM)
+- **Host:** Windows 11, bash via Git for Windows
