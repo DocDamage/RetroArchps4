@@ -20,6 +20,13 @@
 #include <compat/strl.h>
 #include <string/stdstring.h>
 
+/* Query the PS4 display output for the actual connected resolution.
+ * Available in OpenOrbis via <videoout.h>; compiled out when absent. */
+#if defined(__has_include) && __has_include(<videoout.h>)
+#include <videoout.h>
+#define ORBIS_HAS_VIDEOOUT 1
+#endif
+
 #ifdef HAVE_CONFIG_H
 #include "../../config.h"
 #endif
@@ -34,7 +41,6 @@ static enum gfx_ctx_api ctx_orbis_api = GFX_CTX_OPENGL_API;
 
 orbis_ctx_data_t *orbis_ctx_ptr = NULL;
 
-extern bool platform_orbis_has_focus;
 extern input_driver_t input_ps4;
 extern input_device_driver_t ps4_joypad;
 
@@ -144,6 +150,47 @@ static void *orbis_ctx_init(video_frame_info_t *video_info, void *video_driver)
     }
 #endif
 
+#ifdef ORBIS_HAS_VIDEOOUT
+   /* Query the actual display resolution from the video-out hardware so
+    * that set_video_mode uses real dimensions instead of the compile-time
+    * ATTR_ORBISGL_* constants.  Failure is non-fatal: width/height remain
+    * 0 and set_video_mode falls back to the constants. */
+   {
+      int vout = sceVideoOutOpen(
+            0xFF000001 /* SCE_USER_SERVICE_USER_ID_SYSTEM */,
+            0          /* SCE_VIDEO_OUT_BUS_TYPE_MAIN */,
+            0, NULL);
+      if (vout >= 0)
+      {
+         SceVideoOutResolutionStatus res;
+         memset(&res, 0, sizeof(res));
+         if (sceVideoOutGetResolutionStatus(vout, &res) == 0 &&
+              res.fullWidth > 0 && res.fullHeight > 0)
+          {
+             ctx_orbis->width  = res.fullWidth;
+             ctx_orbis->height = res.fullHeight;
+             if (res.refreshRate > 0.0f)
+                ctx_orbis->refresh_rate = res.refreshRate;
+             RARCH_LOG("[ORBIS] Display resolution: %ux%u @ %.2f Hz\n",
+                       ctx_orbis->width, ctx_orbis->height,
+                       ctx_orbis->refresh_rate);
+         }
+         else
+         {
+            RARCH_WARN("[ORBIS] sceVideoOutGetResolutionStatus failed — "
+                       "falling back to %ux%u\n",
+                       ATTR_ORBISGL_WIDTH, ATTR_ORBISGL_HEIGHT);
+         }
+         sceVideoOutClose(vout);
+      }
+      else
+      {
+         RARCH_WARN("[ORBIS] sceVideoOutOpen failed (0x%08X) — "
+                    "display resolution query skipped\n", vout);
+      }
+   }
+#endif
+
     return ctx_orbis;
 
 error:
@@ -187,12 +234,8 @@ static bool orbis_ctx_set_video_mode(void *data,
     ctx_orbis->width = width ? width : ATTR_ORBISGL_WIDTH;
     ctx_orbis->height = height ? height : ATTR_ORBISGL_HEIGHT;
 
-    ctx_orbis->native_window.uID      = 0;
-    ctx_orbis->native_window.uWidth   = ctx_orbis->width;
-    ctx_orbis->native_window.uHeight  = ctx_orbis->height;
-    ctx_orbis->native_window.uPadding = 0;
-
-    ctx_orbis->refresh_rate = 60;
+    if (ctx_orbis->refresh_rate <= 0.0f)
+       ctx_orbis->refresh_rate = 60.0f;
 
 #ifdef HAVE_EGL
     if (!egl_create_context(&ctx_orbis->egl, contextAttributeList))
@@ -292,6 +335,8 @@ static gfx_ctx_proc_t orbis_ctx_get_proc_address(const char *symbol)
 #ifdef HAVE_EGL
     return egl_get_proc_address(symbol);
 #endif
+   (void)symbol;
+   return NULL;
 }
 
 static void orbis_ctx_bind_hw_render(void *data, bool enable)

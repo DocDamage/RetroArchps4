@@ -64,6 +64,7 @@ typedef struct
 } ds_joypad_state;
 
 static ds_joypad_state ds_joypad_states[PS4_MAX_ORBISPADS];
+static OrbisPadData   pad_data_cache[PS4_MAX_ORBISPADS];
 static uint64_t pad_state[PS4_MAX_ORBISPADS];
 static int16_t analog_state[PS4_MAX_ORBISPADS][2][2];
 static int16_t num_players = 0;
@@ -193,7 +194,7 @@ static void ps4_joypad_get_buttons(unsigned port_num, input_bits_t *state)
 
 static int16_t ps4_joypad_axis(unsigned port_num, uint32_t joyaxis)
 {
-   OrbisPadData buttons;
+   const OrbisPadData *buttons;
    int16_t    val = 0;
 
    if (port_num >= PS4_MAX_ORBISPADS)
@@ -203,8 +204,7 @@ static int16_t ps4_joypad_axis(unsigned port_num, uint32_t joyaxis)
    if (joyaxis == AXIS_NONE)
       return 0;
 
-   if (scePadReadState(ds_joypad_states[port_num].handle, &buttons) != 0)
-      return 0;
+   buttons = &pad_data_cache[port_num];
 
    if (AXIS_POS_GET(joyaxis) != AXIS_DIR_NONE)
    {
@@ -212,16 +212,16 @@ static int16_t ps4_joypad_axis(unsigned port_num, uint32_t joyaxis)
       switch (axis_idx)
       {
          case 0:  /* Left  X */
-            val = ((int32_t)buttons.leftStick.x  - 0x80) << 8;
+            val = ((int32_t)buttons->leftStick.x  - 0x80) << 8;
             break;
          case 1:  /* Left  Y (inverted: up = negative) */
-            val = ((int32_t)buttons.leftStick.y  - 0x80) << 8;
+            val = ((int32_t)buttons->leftStick.y  - 0x80) << 8;
             break;
          case 2:  /* Right X */
-            val = ((int32_t)buttons.rightStick.x - 0x80) << 8;
+            val = ((int32_t)buttons->rightStick.x - 0x80) << 8;
             break;
          case 3:  /* Right Y */
-            val = ((int32_t)buttons.rightStick.y - 0x80) << 8;
+            val = ((int32_t)buttons->rightStick.y - 0x80) << 8;
             break;
          default: break;
       }
@@ -233,10 +233,10 @@ static int16_t ps4_joypad_axis(unsigned port_num, uint32_t joyaxis)
       unsigned axis_idx = AXIS_NEG_GET(joyaxis);
       switch (axis_idx)
       {
-         case 0:  val = ((int32_t)buttons.leftStick.x  - 0x80) << 8; break;
-         case 1:  val = ((int32_t)buttons.leftStick.y  - 0x80) << 8; break;
-         case 2:  val = ((int32_t)buttons.rightStick.x - 0x80) << 8; break;
-         case 3:  val = ((int32_t)buttons.rightStick.y - 0x80) << 8; break;
+         case 0:  val = ((int32_t)buttons->leftStick.x  - 0x80) << 8; break;
+         case 1:  val = ((int32_t)buttons->leftStick.y  - 0x80) << 8; break;
+         case 2:  val = ((int32_t)buttons->rightStick.x - 0x80) << 8; break;
+         case 3:  val = ((int32_t)buttons->rightStick.y - 0x80) << 8; break;
          default: break;
       }
       if (val > 0)
@@ -270,6 +270,7 @@ static void ps4_joypad_poll(void)
 
       if (ret == 0)
       {
+         pad_data_cache[player] = buttons;
          int32_t state_tmp = buttons.buttons;
          pad_state[i] = 0;
 

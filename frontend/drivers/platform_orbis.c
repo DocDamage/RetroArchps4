@@ -36,6 +36,7 @@
 #include <debugnet.h>
 #endif
 #include <orbisFile.h>
+#include <sys/stat.h>
 
 typedef struct Orbis2dConfig Orbis2dConfig;
 typedef struct OrbisPadConfig OrbisPadConfig;
@@ -66,6 +67,10 @@ typedef struct OrbisKeyboardConfig OrbisKeyboardConfig;
 typedef struct OrbisGlobalConf
 {
 	Orbis2dConfig *conf;
+	/* confPad: reserved ABI field.  Pad lifecycle is owned by
+	 * ps4_joypad_init()/destroy() — this field is never read by
+	 * RetroArch.  Do NOT remove: external PS4 loaders that hand us
+	 * an OrbisGlobalConf pointer expect this field at this offset. */
 	OrbisPadConfig *confPad;
 	OrbisAudioConfig *confAudio;
 	OrbisKeyboardConfig *confKeyboard;
@@ -305,6 +310,18 @@ static uint64_t frontend_orbis_get_mem_used(void)
       }
       fclose(f);
    }
+   /* /proc/self/statm is not available — retail firmware or procfs not
+    * mounted.  Log once so developers know the OSD "0 MB" reading is not
+    * a real value.  A proper fix needs sceKernelGetProcessMemoryUsage()
+    * or a kernel-specific call; deferred until on-device testing. */
+   {
+      static bool warned = false;
+      if (!warned)
+      {
+         RARCH_WARN("[ORBIS] /proc/self/statm unavailable — memory stats disabled.\n");
+         warned = true;
+      }
+   }
    return 0;
 }
 
@@ -430,6 +447,17 @@ enum frontend_architecture frontend_orbis_get_architecture(void)
    return FRONTEND_ARCH_X86_64;
 }
 
+/* Returns true if path exists and is accessible.  Used to suppress
+ * removable mounts (/usb0, /usb1) from the drive list when they are
+ * not present.  Note: stat() confirms the path exists in the VFS; it
+ * does not distinguish between an empty mount point and a mounted
+ * volume — on-device testing is needed to verify this behaviour. */
+static bool orbis_path_accessible(const char *path)
+{
+   struct stat st;
+   return stat(path, &st) == 0;
+}
+
 static int frontend_orbis_parse_drive_list(void *data, bool load_content)
 {
 #ifndef IS_SALAMANDER
@@ -463,16 +491,18 @@ static int frontend_orbis_parse_drive_list(void *data, bool load_content)
          msg_hash_to_str(MENU_ENUM_LABEL_FILE_DETECT_CORE_LIST_PUSH_DIR),
          enum_idx,
          FILE_TYPE_DIRECTORY, 0, 0);
-   menu_entries_append_enum(list,
-         "/usb0",
-         msg_hash_to_str(MENU_ENUM_LABEL_FILE_DETECT_CORE_LIST_PUSH_DIR),
-         enum_idx,
-         FILE_TYPE_DIRECTORY, 0, 0);
-   menu_entries_append_enum(list,
-         "/usb1",
-         msg_hash_to_str(MENU_ENUM_LABEL_FILE_DETECT_CORE_LIST_PUSH_DIR),
-         enum_idx,
-         FILE_TYPE_DIRECTORY, 0, 0);
+   if (orbis_path_accessible("/usb0"))
+      menu_entries_append_enum(list,
+            "/usb0",
+            msg_hash_to_str(MENU_ENUM_LABEL_FILE_DETECT_CORE_LIST_PUSH_DIR),
+            enum_idx,
+            FILE_TYPE_DIRECTORY, 0, 0);
+   if (orbis_path_accessible("/usb1"))
+      menu_entries_append_enum(list,
+            "/usb1",
+            msg_hash_to_str(MENU_ENUM_LABEL_FILE_DETECT_CORE_LIST_PUSH_DIR),
+            enum_idx,
+            FILE_TYPE_DIRECTORY, 0, 0);
    menu_entries_append_enum(list,
          "/data/self",
          msg_hash_to_str(MENU_ENUM_LABEL_FILE_DETECT_CORE_LIST_PUSH_DIR),

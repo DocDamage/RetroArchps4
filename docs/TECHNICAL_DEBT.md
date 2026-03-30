@@ -1,7 +1,7 @@
 # Technical Debt Audit — RetroArch Orbis/PS4 Port
 
 **Branch:** `orbis-build-cleanup-pass1`
-**Last updated:** 2026-03-30
+**Last updated:** 2026-03-30 (pass 5 — debt audit quick wins + pad cache + refresh rate)
 **Scope:** Orbis-specific files only
 
 ---
@@ -40,52 +40,40 @@ These items were listed as OPEN but verified as already resolved in the current 
 | # | Issue | Evidence | Status |
 | --- | ------- | -------- | ------ |
 | 5 | Silent failure if PKG tools missing | `Makefile.orbis:443-448` — `check-pkg-tools` now uses `$(error ...)` for all tool checks | **FIXED** |
+| 7 | `argv` contract undocumented | `platform_orbis.c:88-96` — block comment documents `argv[0]`/`[1]`/`[2]` contract and nulling behaviour | **FIXED** |
 | 9 | `orbisAudioInit` error code not captured | `orbis_audio.c:106` — `RARCH_ERR("...failed: 0x%08X\n", ret)` captures and logs the return code | **FIXED** |
 | 10 | Audio write doesn't accumulate across small calls | `orbis_audio.c:155-183` — proper accumulation loop buffers partial writes in `float_buf`, outputs only when a full 512-sample block is ready | **FIXED** |
 | 11 | Zero-padding doesn't clear stale frame data | No zero-pad path exists in current code. The new accumulation approach converts `float_buf` → `pcm_buf` as a complete block, eliminating the stale data issue | **FIXED** |
+| swap_interval | `orbis_ctx_set_swap_interval` was ignoring its argument | `orbis_ctx.c:277` — now passes `swap_interval` directly to `egl_set_swap_interval` (commit `166ebb1`) | **FIXED** |
+| audio stop | Audio buffers not zeroed on stop, causing resume pops | `orbis_audio.c:193-196` — `orbis_audio_stop` now `memset`s both `float_buf` and `pcm_buf` (commit `166ebb1`) | **FIXED** |
+| 18 | No annotation on required vs. optional libs in `PS4_LIBS` | `Makefile.orbis:279-282` — base libs have a comment block; all conditional libs have inline comments | **FIXED** |
 
----
+### Fixed in pass 4 (2026-03-30)
 
-## OPEN — HIGH
+| # | Issue | Fix |
+| --- | ------- | ----- |
+| 4 | Resolution hardcoded to 1920×1080 | `orbis_ctx.c` — `orbis_ctx_init` now calls `sceVideoOutGetResolutionStatus` (gated on `ORBIS_HAS_VIDEOOUT` via `__has_include`) to populate `ctx_orbis->width`/`height` before `set_video_mode` is called. Requires on-device validation. |
+| 6 | `confPad` dead field undocumented | `platform_orbis.c` — ABI comment added explaining the field must not be removed (external loader ABI) even though RetroArch never reads it. |
+| 13 | `/usb0`/`/usb1` appended unconditionally | `platform_orbis.c` — `orbis_path_accessible()` helper added; both paths now guarded with `stat()` before appending. Requires on-device validation of `stat()` behaviour on mount points. |
+| 16 | `get_mem_used` returns 0 silently on retail | `platform_orbis.c` — `RARCH_WARN` emitted once when `/proc/self/statm` is unavailable, so developers see the fallback in logs. Still returns 0; full fix needs `sceKernelGetProcessMemoryUsage` on-device. |
 
-### 4. Resolution always 1920×1080 when `width`/`height` fields are 0
+### Fixed in pass 5 (2026-03-30)
 
-**File:** `gfx/drivers_context/orbis_ctx.c` — `orbis_ctx_get_video_size`
+These items were identified by a full technical debt audit and fixed immediately:
 
-`orbis_ctx_get_video_size` now correctly checks `ctx_orbis->width`/`height` before falling back to
-the compile-time constants. However, `orbis_ctx_set_video_mode` only sets these fields to the
-`width`/`height` arguments passed by the video driver, which may themselves be 0 on first
-init. A proper dynamic-resolution path would need to query the display hardware via
-`sceVideoOutGetResolutionStatus` or similar.
-
-**Deferred:** requires on-device testing.
+| # | Issue | Fix |
+| --- | ------- | ----- |
+| 19 | `orbis_ctx_get_proc_address` missing return — UB when `HAVE_EGL` is off | Added `(void)symbol; return NULL;` after `#endif` (`orbis_ctx.c:339-340`) |
+| 20 | Dead `extern bool platform_orbis_has_focus` — copy-paste from Switch, never defined | Removed the extern declaration (`orbis_ctx.c:44`) |
+| 21 | `ORBIS_ENABLE_CHEEVOS ?= 1` misleading — silently disabled by `HAVE_NETWORKING=0` nesting in `Makefile.common` | Changed default to `?= 0`; added `$(warning ...)` when explicitly set to 1 without networking (`Makefile.orbis:11,242-248`) |
+| 22 | Build artifacts tracked in git (`param.sfo`, `.gp4`) | `git rm --cached`; added `dist/pkg_orbis/sce_sys/param.sfo` to `.gitignore` |
+| 23 | `NUL` Windows artifact in repo root | Deleted; added `NUL` to `.gitignore` |
+| 24 | `ps4_joypad_axis` calls `scePadReadState` a second time per pad per frame | Added `pad_data_cache[]` array; `ps4_joypad_poll` stores `OrbisPadData`; `ps4_joypad_axis` reads from cache (`ps4_joypad.c:67,271,196`) |
+| 25 | `refresh_rate` hardcoded to 60 — PAL displays will drift | `orbis_ctx_init` now reads `res.refreshRate` from `sceVideoOutGetResolutionStatus`; `set_video_mode` preserves the queried value with 60 Hz fallback (`orbis_ctx.c:170-176,239-241`) |
 
 ---
 
 ## OPEN — MEDIUM
-
-### 6. Incomplete pad init scaffolding
-
-**File:** `frontend/drivers/platform_orbis.c`
-
-`scePadInit()` is called from `ps4_joypad_init` (the joypad driver), not the frontend.
-`OrbisGlobalConf` still carries a `confPad` field that is never read by the joypad driver.
-This dead field should be removed or documented as reserved.
-
-**Status:** partially resolved — comment on line 137 documents pad ownership.
-
----
-
-### 7. `argv` stripped in two places
-
-**Files:** `frontend/drivers/platform_orbis.c`
-
-`argv[1]` is consumed by `attach_runtime_conf` (parsed as OrbisGlobalConf pointer), then
-nulled on line 133. `argv[2]` is consumed as a content path on line 210.
-`retroarch.c` has no ORBIS-specific argv processing, so the risk is low. Adding comments
-to document the `argv` contract is the remaining action.
-
----
 
 ### 12. Opaque PGL config fields and magic memory constants
 
@@ -99,38 +87,7 @@ There is no adaptive logic for GPUs with different available memory.
 
 ---
 
-### 13. Hardcoded mount points with no existence check
-
-**File:** `frontend/drivers/platform_orbis.c`
-
-`host0:app`, `/usb0`, `/usb1` are unconditionally added to the drive list with no check that
-they exist. Should check before appending, or discover mounts dynamically.
-
-**Deferred:** `stat()` behavior on PS4 mount points needs on-device testing.
-
----
-
-### NEW: `orbis_ctx_set_swap_interval` ignores the parameter
-
-**File:** `gfx/drivers_context/orbis_ctx.c` — line 277
-
-The function receives `swap_interval` but always passes `0` to `egl_set_swap_interval`.
-This means vsync cannot be controlled at runtime until this is fixed.
-
----
-
 ## OPEN — LOW
-
-### 16. `frontend_orbis_get_mem_used` returns 0 silently on retail firmware
-
-**File:** `frontend/drivers/platform_orbis.c`
-
-`/proc/self/statm` does not exist on retail PS4 firmware. The function silently returns 0,
-causing the OSD to show "0 MB used" on retail units.
-
-**Deferred:** needs `sceKernelGetProcessMemoryUsage` or similar; retail-only.
-
----
 
 ### 17. Total available RAM uses a hardcoded fallback
 
@@ -138,15 +95,6 @@ causing the OSD to show "0 MB used" on retail units.
 
 `sceKernelGetDirectMemorySize()` is tried first (correct for OpenOrbis). The fallback is
 `5 GB` which differs between PS4 models. Acceptable for now.
-
----
-
-### 18. No annotation on required vs. optional libs in `PS4_LIBS`
-
-**File:** `Makefile.orbis`
-
-The `PS4_LIBS` list has no comments indicating which libraries are required for each build
-profile (dev / full / lite).
 
 ---
 
@@ -165,19 +113,16 @@ profile (dev / full / lite).
 
 | Severity | Open | Fixed |
 | ---------- | ------ | ------- |
-| CRITICAL | 0 | 2 |
-| HIGH     | 1 | 4 |
-| MEDIUM   | 4 | 7 |
-| LOW      | 3 | 1 |
+| CRITICAL | 0 | 3 |
+| HIGH | 0 | 6 |
+| MEDIUM | 1 | 18 |
+| LOW | 1 | 3 |
 
 ---
 
-## Recommended fix order (remaining open items)
+## Remaining open items
 
 | Priority | File | Issue |
 | ---------- | ------ | ------- |
-| 1 | `gfx/drivers_context/orbis_ctx.c` | `orbis_ctx_set_swap_interval`: pass actual argument |
-| 2 | `audio/drivers/orbis_audio.c` | Zero buffers in `orbis_audio_stop` to prevent resume pops |
-| 3 | `Makefile.orbis` | Annotate `PS4_LIBS` with per-profile comments |
-| 4 | `frontend/drivers/platform_orbis.c` | Document `argv` contract in comments |
-| 5 | `frontend/drivers/platform_orbis.c` | Remove or document `confPad` in `OrbisGlobalConf` |
+| 1 | `gfx/common/orbis_common.h` | Investigate `unk_0x5C` and `dbgPosCmd_0x4x` fields in `ScePglConfig` (on-device) |
+| 2 | `frontend/drivers/platform_orbis.c` | `sceKernelGetProcessMemoryUsage` fallback for retail memory OSD (on-device) |

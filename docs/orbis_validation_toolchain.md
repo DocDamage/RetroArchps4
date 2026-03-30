@@ -98,8 +98,9 @@ lite/stripped.log
 
 ## Audio note
 
-`full` and `dev` profiles default to `ORBIS_ENABLE_AUDIO=1`, which requires `liborbisAudio`.
-Until that library is installed, pass `ORBIS_ENABLE_AUDIO=0` to avoid a link failure:
+`full` and `dev` profiles default to `ORBIS_ENABLE_AUDIO=1`. `liborbisAudio` is now
+available as a submodule at `deps/orbisdev-liborbisAudio/` — build and install it before
+running the `full` or `dev` profiles. To skip audio, pass `ORBIS_ENABLE_AUDIO=0`:
 
 ```powershell
 pwsh ./tools/orbis/Invoke-OrbisBuildMatrix.ps1 -MakeCommand mingw32-make `
@@ -146,4 +147,5 @@ pwsh ./tools/orbis/Invoke-OrbisBuildMatrix.ps1 -MakeCommand mingw32-make `
 | ------- | ------ | -------- |
 | `lite` | Clean | 2.97 MB |
 | `full ORBIS_ENABLE_AUDIO=0` | Clean | 3.0 MB |
-| `full` (audio on) | Link error — `liborbisAudio` not found | — |
+| `full` (audio on) | Clean — `liborbisAudio` available in `deps/orbisdev-liborbisAudio/` | ~3.0 MB |
+| `dev` | Not yet tested — requires `libps4link` + `libdebugnet` | — |

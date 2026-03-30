@@ -1,6 +1,6 @@
 # Orbis validation review
 
-**Last updated:** 2026-03-30
+**Last updated:** 2026-03-30 (pass 4 — TD#4/6/13/16 implemented)
 **Branch:** `orbis-build-cleanup-pass1`
 
 ---
@@ -106,12 +106,11 @@ items are either low priority or require on-device testing:
 
 1. **Run the PKG pipeline end-to-end:** `make pkg-lite` with OpenOrbis tools, confirm the
    resulting `.pkg` includes `icon0.png` and `param.sfo`.
-2. **Test `full` profile with audio:** `make -f Makefile.orbis full` now that liborbisAudio
-   is in `deps/`. Verify clean link.
-3. **Test `dev` profile:** requires `libps4link` and `libdebugnet`. Not currently installed.
-4. **Hardware boot test:** the ELF has never been booted on real hardware. EGL surface
+2. **Test `dev` profile:** requires `libps4link` and `libdebugnet`. Not currently installed.
+3. **Hardware boot test:** the ELF has never been booted on real hardware. EGL surface
    creation, audio output, file access, and controller input all need on-device validation.
-5. **Test keyboard/mouse toggles:** experimental until confirmed with matching SDK stubs.
+   See [orbis_feature_plan.md](orbis_feature_plan.md) for the full on-device test plan.
+4. **Test keyboard/mouse toggles:** experimental until confirmed with matching SDK stubs.
 
 ---
 
