@@ -17,6 +17,7 @@
 	</volume>
 	<files img_no="0">
 		<file targ_path="eboot.bin" orig_path="eboot.bin" />
+		<file targ_path="sce_sys/icon0.png" orig_path="sce_sys/icon0.png" />
 		<file targ_path="sce_sys/param.sfo" orig_path="sce_sys/param.sfo" />	</files>
 	<rootdir>
 		<dir targ_name="sce_sys">

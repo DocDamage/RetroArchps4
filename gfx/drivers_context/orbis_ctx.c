@@ -274,7 +274,7 @@ static void orbis_ctx_set_swap_interval(void *data,
     orbis_ctx_data_t *ctx_orbis = (orbis_ctx_data_t *)data;
 
 #ifdef HAVE_EGL
-    egl_set_swap_interval(&ctx_orbis->egl, 0);
+    egl_set_swap_interval(&ctx_orbis->egl, swap_interval);
 #endif
 }
 

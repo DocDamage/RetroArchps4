@@ -1,7 +1,7 @@
 # Technical Debt Audit — RetroArch Orbis/PS4 Port
 
 **Branch:** `orbis-build-cleanup-pass1`
-**Last updated:** 2026-03-26
+**Last updated:** 2026-03-30
 **Scope:** Orbis-specific files only
 
 ---
@@ -33,6 +33,17 @@ Additionally, the following issues were found and fixed during the first compile
 | `<7zip/7z.h>` not found — `-Ideps` missing | `Makefile.orbis` | Added `-Ideps` to `INCDIRS` | `54b12ca` |
 | `core/` subdir move broke `../header.h` relative includes | All of `input/`, `menu/`, `gfx/`, `ui/` | Reverted: root-level headers stay at root | `2b0a8b1` |
 
+### Fixed during second audit (2026-03-30)
+
+These items were listed as OPEN but verified as already resolved in the current codebase:
+
+| # | Issue | Evidence | Status |
+| --- | ------- | -------- | ------ |
+| 5 | Silent failure if PKG tools missing | `Makefile.orbis:443-448` — `check-pkg-tools` now uses `$(error ...)` for all tool checks | **FIXED** |
+| 9 | `orbisAudioInit` error code not captured | `orbis_audio.c:106` — `RARCH_ERR("...failed: 0x%08X\n", ret)` captures and logs the return code | **FIXED** |
+| 10 | Audio write doesn't accumulate across small calls | `orbis_audio.c:155-183` — proper accumulation loop buffers partial writes in `float_buf`, outputs only when a full 512-sample block is ready | **FIXED** |
+| 11 | Zero-padding doesn't clear stale frame data | No zero-pad path exists in current code. The new accumulation approach converts `float_buf` → `pcm_buf` as a complete block, eliminating the stale data issue | **FIXED** |
+
 ---
 
 ## OPEN — HIGH
@@ -44,16 +55,10 @@ Additionally, the following issues were found and fixed during the first compile
 `orbis_ctx_get_video_size` now correctly checks `ctx_orbis->width`/`height` before falling back to
 the compile-time constants. However, `orbis_ctx_set_video_mode` only sets these fields to the
 `width`/`height` arguments passed by the video driver, which may themselves be 0 on first
-init. A proper dynamic-resolution path would need to query the display hardware.
+init. A proper dynamic-resolution path would need to query the display hardware via
+`sceVideoOutGetResolutionStatus` or similar.
 
----
-
-### 5. Silent failure if PKG tools are missing
-
-**File:** `Makefile.orbis` — `pkg` target
-
-The `check-pkg-tools` target prints an error message but does not halt make with a non-zero
-exit code when `create-fself` or `create-pkg` are absent. `$(error ...)` should be used instead.
+**Deferred:** requires on-device testing.
 
 ---
 
@@ -61,53 +66,24 @@ exit code when `create-fself` or `create-pkg` are absent. `$(error ...)` should 
 
 ### 6. Incomplete pad init scaffolding
 
-**File:** `frontend/drivers/platform_orbis.c` — `frontend_orbis_init`
+**File:** `frontend/drivers/platform_orbis.c`
 
-`scePadInit()` is called from `ps4_joypad_init` (the joypad driver), not the frontend. Any
-residual pad-open/close scaffolding in `platform_orbis.c` that pre-dates the joypad driver
-should be audited and removed if it duplicates the joypad driver's work.
+`scePadInit()` is called from `ps4_joypad_init` (the joypad driver), not the frontend.
+`OrbisGlobalConf` still carries a `confPad` field that is never read by the joypad driver.
+This dead field should be removed or documented as reserved.
+
+**Status:** partially resolved — comment on line 137 documents pad ownership.
 
 ---
 
 ### 7. `argv` stripped in two places
 
-**Files:** `retroarch.c`, `frontend/drivers/platform_orbis.c`
+**Files:** `frontend/drivers/platform_orbis.c`
 
-Both sites independently strip or inspect the first two `argv` entries under `#ifdef ORBIS`.
-No comment explains what those arguments represent or which site is authoritative. Risk of
-double-processing if execution order changes.
-
----
-
-### 9. `orbisAudioInit` error code not captured
-
-**File:** `audio/drivers/orbis_audio.c`
-
-```c
-if (orbisAudioInit() < 0) { RARCH_ERR("failed"); return NULL; }
-```
-
-The specific error code is discarded. Debugging audio init failures requires a debugger attach
-rather than reading a log. Capture the return value and log it with `%d` / `0x%08X`.
-
----
-
-### 10. Audio write doesn't accumulate across small calls
-
-**File:** `audio/drivers/orbis_audio.c`
-
-If `size` is smaller than one full 512-sample block, `frames_in` rounds to 0 and the function
-returns 0 with no output. Repeated small writes produce silence. An accumulation buffer is
-needed to hold partial blocks across calls.
-
----
-
-### 11. Zero-padding doesn't clear stale frame data
-
-**File:** `audio/drivers/orbis_audio.c`
-
-Only the tail portion of `pcm_buf` is zeroed when a partial block arrives. Data from a prior
-incomplete write can bleed into the next output block if the buffer is not fully cleared first.
+`argv[1]` is consumed by `attach_runtime_conf` (parsed as OrbisGlobalConf pointer), then
+nulled on line 133. `argv[2]` is consumed as a content path on line 210.
+`retroarch.c` has no ORBIS-specific argv processing, so the risk is low. Adding comments
+to document the `argv` contract is the remaining action.
 
 ---
 
@@ -115,9 +91,11 @@ incomplete write can bleed into the next output block if the buffer is not fully
 
 **File:** `gfx/common/orbis_common.h`
 
-Fields such as `unk_0x5C = 2` and `dbgPosCmd_0x40` are unexplained. Memory budgets
-(2 MB / 36 MB / 170 MB / 768 KB) have no source references. There is no adaptive logic for
-GPUs with different available memory.
+Named constants with comments have been added (`ORBISGL_PGL_SYSTEM_SHARED_MEM`, etc.).
+Fields `unk_0x5C = 2` and `dbgPosCmd_0x40`/`0x44`/`0x48`/`0x4C` remain unexplained.
+There is no adaptive logic for GPUs with different available memory.
+
+**Status:** partially addressed.
 
 ---
 
@@ -128,6 +106,17 @@ GPUs with different available memory.
 `host0:app`, `/usb0`, `/usb1` are unconditionally added to the drive list with no check that
 they exist. Should check before appending, or discover mounts dynamically.
 
+**Deferred:** `stat()` behavior on PS4 mount points needs on-device testing.
+
+---
+
+### NEW: `orbis_ctx_set_swap_interval` ignores the parameter
+
+**File:** `gfx/drivers_context/orbis_ctx.c` — line 277
+
+The function receives `swap_interval` but always passes `0` to `egl_set_swap_interval`.
+This means vsync cannot be controlled at runtime until this is fixed.
+
 ---
 
 ## OPEN — LOW
@@ -137,8 +126,9 @@ they exist. Should check before appending, or discover mounts dynamically.
 **File:** `frontend/drivers/platform_orbis.c`
 
 `/proc/self/statm` does not exist on retail PS4 firmware. The function silently returns 0,
-causing the OSD to show "0 MB used" on retail units. The jailbroken path is correct; retail
-needs a fallback via `sceKernelGetProcessMemoryUsage` or similar.
+causing the OSD to show "0 MB used" on retail units.
+
+**Deferred:** needs `sceKernelGetProcessMemoryUsage` or similar; retail-only.
 
 ---
 
@@ -147,8 +137,7 @@ needs a fallback via `sceKernelGetProcessMemoryUsage` or similar.
 **File:** `frontend/drivers/platform_orbis.c`
 
 `sceKernelGetDirectMemorySize()` is tried first (correct for OpenOrbis). The fallback is
-`5 GB` which differs between PS4 models (CUH-1000 has 5 GB accessible; CUH-7000 has
-more). Acceptable for now but document which SDK versions provide the API.
+`5 GB` which differs between PS4 models. Acceptable for now.
 
 ---
 
@@ -157,21 +146,18 @@ more). Acceptable for now but document which SDK versions provide the API.
 **File:** `Makefile.orbis`
 
 The `PS4_LIBS` list has no comments indicating which libraries are required for each build
-profile (dev / full / lite). Adding a new profile risks linking unnecessary or missing stubs.
+profile (dev / full / lite).
 
 ---
 
-## Build status (as of 2026-03-26)
+## Build status (as of 2026-03-30)
 
 | Profile | Command | Result |
 | --------- | --------- | -------- |
 | `lite` | `make -f Makefile.orbis lite` | **Clean** — 2.97 MB ELF |
 | `full` (no audio) | `make -f Makefile.orbis full ORBIS_ENABLE_AUDIO=0` | **Clean** — 3.0 MB ELF |
-| `full` (audio on) | `make -f Makefile.orbis full` | **Blocked** — requires `liborbisAudio` (external homebrew lib, not in OpenOrbis SDK) |
-| `dev` | not yet tested | — |
-
-`orbisAudio` must be built separately from its source and installed under `$(ORBISDEV)/lib/`
-and `$(ORBISDEV)/include/` before the `full` / `dev` profiles can use audio.
+| `full` (audio on) | `make -f Makefile.orbis full` | **Available** — `liborbisAudio` now in `deps/orbisdev-liborbisAudio/` |
+| `dev` | not yet tested | Requires `libps4link` + `libdebugnet` |
 
 ---
 
@@ -180,8 +166,8 @@ and `$(ORBISDEV)/include/` before the `full` / `dev` profiles can use audio.
 | Severity | Open | Fixed |
 | ---------- | ------ | ------- |
 | CRITICAL | 0 | 2 |
-| HIGH     | 2 | 3 |
-| MEDIUM   | 6 | 4 |
+| HIGH     | 1 | 4 |
+| MEDIUM   | 4 | 7 |
 | LOW      | 3 | 1 |
 
 ---
@@ -190,9 +176,8 @@ and `$(ORBISDEV)/include/` before the `full` / `dev` profiles can use audio.
 
 | Priority | File | Issue |
 | ---------- | ------ | ------- |
-| 1 | `Makefile.orbis` | `check-pkg-tools`: use `$(error ...)` to fail hard |
-| 2 | `audio/drivers/orbis_audio.c` | Log `orbisAudioInit` return code |
-| 3 | `audio/drivers/orbis_audio.c` | Accumulation buffer for sub-block writes |
-| 4 | `audio/drivers/orbis_audio.c` | Clear full buffer before partial-block zero-pad |
-| 5 | `frontend/drivers/platform_orbis.c` | Audit/remove duplicate pad init scaffolding |
-| 6 | `frontend/drivers/platform_orbis.c` | Annotate argv stripping logic |
+| 1 | `gfx/drivers_context/orbis_ctx.c` | `orbis_ctx_set_swap_interval`: pass actual argument |
+| 2 | `audio/drivers/orbis_audio.c` | Zero buffers in `orbis_audio_stop` to prevent resume pops |
+| 3 | `Makefile.orbis` | Annotate `PS4_LIBS` with per-profile comments |
+| 4 | `frontend/drivers/platform_orbis.c` | Document `argv` contract in comments |
+| 5 | `frontend/drivers/platform_orbis.c` | Remove or document `confPad` in `OrbisGlobalConf` |

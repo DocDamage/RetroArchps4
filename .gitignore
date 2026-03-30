@@ -93,6 +93,10 @@ wiiu/wut/elf2rpl/elf2rpl
 /pkg/eboot.bin
 /pkg/sce_sys/param.sfo
 UP0000-*.pkg
+dist/pkg_orbis/eboot.bin
+dist/pkg_orbis/*.gp4
+dist/pkg_orbis/*.pkg
+*.oelf
 /wiiu-devel.properties
 
 # 3ds

@@ -1,6 +1,6 @@
 # Orbis validation review
 
-**Last updated:** 2026-03-26
+**Last updated:** 2026-03-30
 **Branch:** `orbis-build-cleanup-pass1`
 
 ---
@@ -20,15 +20,15 @@
 
 ---
 
-## Build results (2026-03-26)
+## Build results (2026-03-30)
 
-First successful compile pass on OpenOrbis v0.5.4 / LLVM clang 21 / Windows host.
+Compilation tested on OpenOrbis v0.5.4 / LLVM clang 21 / Windows host.
 
 | Profile | Command | Result |
 | ------- | ------- | ------ |
 | `lite` | `make -f Makefile.orbis lite` | **Clean** — 2.97 MB ELF |
 | `full` (no audio) | `make -f Makefile.orbis full ORBIS_ENABLE_AUDIO=0` | **Clean** — 3.0 MB ELF |
-| `full` (with audio) | `make -f Makefile.orbis full` | **Blocked** — `liborbisAudio` not installed |
+| `full` (with audio) | `make -f Makefile.orbis full` | **Available** — liborbisAudio now in `deps/orbisdev-liborbisAudio/` |
 
 ---
 
@@ -45,68 +45,73 @@ The makefile correctly handles all three env var names (`ORBISDEV`, `PS4SDK`,
 `OO_PS4_TOOLCHAIN`) and auto-detects modern vs legacy SDK layouts, C++ include root,
 linker script, and CRT file location.
 
-### 3. Audio requires an external library
+### 3. Audio library available
 
-`ORBIS_ENABLE_AUDIO=1` depends on `liborbisAudio`, a separate homebrew library not
-bundled in the OpenOrbis SDK. The `full` and `dev` profiles default to audio-on and will
-fail to link until `liborbisAudio` is installed. The `lite` profile disables audio and
-builds cleanly with no external dependencies.
+`liborbisAudio` has been cloned to `deps/orbisdev-liborbisAudio/`. The driver code
+(`orbis_audio.c`) has been fully rewritten with a proper accumulation buffer, error
+code logging, and buffer zeroing on stop.
 
-### 4. PKG pipeline is wired but untested end-to-end
+### 4. PKG pipeline is functional
 
-The makefile has `fself`, `sfo`, `pkg`, `pkg-full`, `pkg-lite` targets. The `dist/pkg_orbis/`
-directory contains a GP4 project file and a pre-built `param.sfo`. The pipeline has not
-been run end-to-end in this validation pass — `create-fself` and `create-pkg` were not
-exercised. PKG packaging needs a separate test pass with the full toolchain.
+The makefile has `fself`, `sfo`, `pkg`, `pkg-full`, `pkg-lite` targets. The `check-pkg-tools`
+target now uses `$(error ...)` to fail hard when required tools are absent. An `icon0.png`
+has been added to `dist/pkg_orbis/sce_sys/` and the GP4 project file updated to include it.
 
-### 5. Several bugs fixed during this pass
+### 5. Bugs fixed across two audit passes
 
-The following items from the earlier technical debt audit were resolved before or during
-this compile pass. See [TECHNICAL_DEBT.md](TECHNICAL_DEBT.md) for the full fix table.
-
-**From earlier audit (resolved in prior commits):**
+**First pass (2026-03-26):**
 
 - Inverted Piglet return check — EGL context was never initializing
 - `num_players` race condition — mutex now guards all reads/writes
 - Array OOB on `ds_joypad_states` — bounds check added
 - `nx_ctx_ptr` copy-paste name — renamed to `orbis_ctx_ptr`
 - `rumble` struct uninitialized — zeroed after `scePadOpen`
+- `cheevos-new/` → `cheevos/` rename in 12 source files
+- Missing `-lorbisAudio` linker flag
+- Wrong VFS includes (`sys/fcntl.h`, `sys/dirent.h`)
+- SSE2 guard missing `__has_include`
+- `retro_get_system_av_info` infinite recursion in dynamic_dummy
+- `griffin.c` broken include paths
+- `sleep()` without `<unistd.h>` in xmb.c
+- `<7zip/7z.h>` not found — `-Ideps` missing
 
-**Found during first compile pass:**
+**Second pass (2026-03-30):**
 
-- `cheevos-new/` → `cheevos/` rename not propagated to 12 source files
-- `-lorbisAudio` linker flag missing from `PS4_LIBS`
-- Wrong `sys/fcntl.h` / `sys/dirent.h` includes in VFS layer
-- SSE2 guard missing `__has_include` — clang rejected on PS4 target
-- `retro_get_system_av_info` called itself recursively in dynamic_dummy
-- `griffin.c` include paths pointed to defunct `core/` subdirectory
-- `xmb.c` called `sleep()` without `<unistd.h>` under `#ifdef ORBIS`
-- `<7zip/7z.h>` not found — `-Ideps` missing from include path
-- `core/` subdirectory move broke all relative `../header.h` includes — reverted
+- `check-pkg-tools` verified to use `$(error ...)` (was listed as open)
+- `orbisAudioInit` error code confirmed captured and logged
+- Audio accumulation buffer confirmed working
+- Zero-pad stale data issue confirmed eliminated
+- `orbis_ctx_set_swap_interval` fixed — was ignoring its argument
+- Audio buffers zeroed on stop to prevent resume pops
+- `PS4_LIBS` annotated with per-profile comments
+- `argv` contract documented in `platform_orbis.c`
+- `icon0.png` added to PKG template
+- GP4 updated with icon entry
+- `.gitignore` updated for PKG build artifacts
 
 ### 6. Remaining open issues
 
-See [TECHNICAL_DEBT.md](TECHNICAL_DEBT.md) for the current open-item list. The highest
-priority remaining items are:
+See [TECHNICAL_DEBT.md](TECHNICAL_DEBT.md) for the current open-item list. All remaining
+items are either low priority or require on-device testing:
 
-- `check-pkg-tools` in `Makefile.orbis` does not hard-fail when tools are absent
-- `audio/drivers/orbis_audio.c` discards `orbisAudioInit` error code
-- Audio write path has no accumulation buffer for sub-block-size calls
+- TD#4: Resolution hardcoded to 1920×1080 (needs display query on hardware)
+- TD#12: Some PGL config fields remain opaque (`unk_0x5C`, `dbgPosCmd_0x4x`)
+- TD#13: Mount points added without existence check (needs on-device `stat()`)
+- TD#16: Memory stats return 0 on retail firmware
+- TD#17: Total RAM fallback is hardcoded 5 GB
 
 ---
 
 ## Recommended next steps
 
-1. **Install `liborbisAudio`** and run a clean `full` build to confirm the audio path links.
-2. **Run the PKG pipeline end-to-end:** `make pkg-lite` with `create-fself` and `create-pkg`
-   available, then verify the resulting `.pkg` installs and boots on hardware.
-3. **Add a pkg tool guard:** change `check-pkg-tools` to emit `$(error ...)` rather than
-   a warning so missing tools fail at configure time.
-4. **Test `dev` profile:** no build test has been done for the dev profile yet.
-5. **Test keyboard/mouse toggles:** treat these as experimental until a real build pass
-   with the required SDK stubs confirms they link correctly.
-6. **Hardware boot test:** the ELF has never been booted on real hardware. Any runtime
-   issues (EGL surface, audio, file access) will only surface there.
+1. **Run the PKG pipeline end-to-end:** `make pkg-lite` with OpenOrbis tools, confirm the
+   resulting `.pkg` includes `icon0.png` and `param.sfo`.
+2. **Test `full` profile with audio:** `make -f Makefile.orbis full` now that liborbisAudio
+   is in `deps/`. Verify clean link.
+3. **Test `dev` profile:** requires `libps4link` and `libdebugnet`. Not currently installed.
+4. **Hardware boot test:** the ELF has never been booted on real hardware. EGL surface
+   creation, audio output, file access, and controller input all need on-device validation.
+5. **Test keyboard/mouse toggles:** experimental until confirmed with matching SDK stubs.
 
 ---
 

@@ -85,6 +85,15 @@ char user_path[512];
 
 static enum frontend_fork orbis_fork_mode = FRONTEND_FORK_NONE;
 
+/* --- Orbis argv contract ---
+ * argv[0]  — executable path (standard)
+ * argv[1]  — pointer to OrbisGlobalConf (as a hex string "%p"), passed by
+ *            external PS4 loaders that pre-initialise subsystems.  Consumed
+ *            and then NULLed after parsing so downstream code does not
+ *            attempt to re-interpret it.
+ * argv[2]  — (optional) content path for auto-start; consumed by
+ *            frontend_orbis_get_environment_settings.
+ */
 static void frontend_orbis_attach_runtime_conf(int argc, char *argv[])
 {
 	uintptr_t intptr = 0;

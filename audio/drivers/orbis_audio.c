@@ -192,6 +192,8 @@ static bool orbis_audio_stop(void *data)
    {
       oa->alive = false;
       oa->buffered_frames = 0;
+      memset(oa->float_buf, 0, sizeof(oa->float_buf));
+      memset(oa->pcm_buf, 0, sizeof(oa->pcm_buf));
    }
    return true;
 }

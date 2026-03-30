@@ -276,20 +276,24 @@ CXXFLAGS := $(CFLAGS)
 
 PS4_LIBS := -lScePigletv2VSH -lSceSystemService -lSceUserService -lScePad \
 	-lkernel -lc -lm -lpthread
+# ↑ Core libs — required by all profiles (lite, full, dev).
+# Piglet = GLES2 via EGL.  SceSystemService = splash screen, app lifecycle.
+# SceUserService + ScePad = controller/user enumeration.
+# kernel/c/m/pthread = FreeBSD userland basics.
 
 ifeq ($(ORBIS_ENABLE_KEYBOARD),1)
    CFLAGS += -DHAVE_KEYBOARD
-   PS4_LIBS += -lSceDbgKeyboard_stub
+   PS4_LIBS += -lSceDbgKeyboard_stub  # Optional: experimental keyboard (off by default)
 endif
 
 ifeq ($(ORBIS_ENABLE_MOUSE),1)
    CFLAGS += -DHAVE_MOUSE
-   PS4_LIBS += -lSceMouse_stub
+   PS4_LIBS += -lSceMouse_stub        # Optional: experimental mouse (off by default)
 endif
 
 ifeq ($(ORBIS_ENABLE_AUDIO),1)
    CFLAGS  += -DHAVE_ORBIS_AUDIO
-   PS4_LIBS += -lorbisAudio
+   PS4_LIBS += -lorbisAudio            # Optional: full/dev only — requires external lib (see docs)
 endif
 
 ifeq ($(ORBIS_ENABLE_APPEXEC),1)
@@ -298,12 +302,12 @@ endif
 
 ifeq ($(ORBIS_ENABLE_PS4LINK),1)
    CFLAGS += -DHAVE_PS4LINK
-   PS4_LIBS += -lps4link
+   PS4_LIBS += -lps4link               # Optional: dev only — PS4Link transport
 endif
 
 ifeq ($(ORBIS_ENABLE_DEBUGNET),1)
    CFLAGS += -DHAVE_DEBUGNET
-   PS4_LIBS += -ldebugnet
+   PS4_LIBS += -ldebugnet              # Optional: dev only — UDP debug logging
 endif
 
 LIBS	:= $(WHOLE_START) $(WHOLE_END) $(PS4_LIBS)
