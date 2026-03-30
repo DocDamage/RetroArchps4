@@ -76,16 +76,16 @@ CONSOLE EXTENSIONS
 #endif
 
 #ifdef INTERNAL_LIBOGC
-#include "../wii/libogc/libfat/cache.c"
-#include "../wii/libogc/libfat/directory.c"
-#include "../wii/libogc/libfat/disc.c"
-#include "../wii/libogc/libfat/fatdir.c"
-#include "../wii/libogc/libfat/fatfile.c"
-#include "../wii/libogc/libfat/file_allocation_table.c"
-#include "../wii/libogc/libfat/filetime.c"
-#include "../wii/libogc/libfat/libfat.c"
-#include "../wii/libogc/libfat/lock.c"
-#include "../wii/libogc/libfat/partition.c"
+#include "../platforms/wii/libogc/libfat/cache.c"
+#include "../platforms/wii/libogc/libfat/directory.c"
+#include "../platforms/wii/libogc/libfat/disc.c"
+#include "../platforms/wii/libogc/libfat/fatdir.c"
+#include "../platforms/wii/libogc/libfat/fatfile.c"
+#include "../platforms/wii/libogc/libfat/file_allocation_table.c"
+#include "../platforms/wii/libogc/libfat/filetime.c"
+#include "../platforms/wii/libogc/libfat/libfat.c"
+#include "../platforms/wii/libogc/libfat/lock.c"
+#include "../platforms/wii/libogc/libfat/partition.c"
 #endif
 
 #endif
@@ -158,11 +158,11 @@ ACHIEVEMENTS
 #include "../libretro-common/formats/json/jsonsax.c"
 #include "../network/net_http_special.c"
 
-#include "../cheevos-new/cheevos.c"
-#include "../cheevos-new/badges.c"
-#include "../cheevos-new/fixup.c"
-#include "../cheevos-new/hash.c"
-#include "../cheevos-new/parser.c"
+#include "../cheevos/cheevos.c"
+#include "../cheevos/badges.c"
+#include "../cheevos/fixup.c"
+#include "../cheevos/hash.c"
+#include "../cheevos/parser.c"
 
 #include "../deps/rcheevos/src/rcheevos/alloc.c"
 #include "../deps/rcheevos/src/rcheevos/condition.c"
@@ -818,8 +818,10 @@ AUDIO
 #include "../audio/drivers/wiiu_audio.c"
 #elif defined(EMSCRIPTEN)
 #include "../audio/drivers/rwebaudio.c"
-#elif defined(PSP) || defined(VITA) || defined(ORBIS)
+#elif defined(PSP) || defined(VITA)
 #include "../audio/drivers/psp_audio.c"
+#elif defined(ORBIS)
+#include "../audio/drivers/orbis_audio.c"
 #elif defined(PS2)
 #include "../audio/drivers/ps2_audio.c"
 #elif defined(_3DS)

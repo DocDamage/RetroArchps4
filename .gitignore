@@ -8,6 +8,7 @@
 *.dol
 *.map
 *.swp
+NUL
 .tmp
 .tmp.c
 .tmp.cxx
@@ -89,6 +90,15 @@ wiiu/wut/elf2rpl/elf2rpl
 /pkg/wiiu/retroarch
 /pkg/wiiu/wiiu
 /pkg/wiiu/rpx
+# PS4 (Orbis) packaging artifacts
+/pkg/eboot.bin
+/pkg/sce_sys/param.sfo
+UP0000-*.pkg
+dist/pkg_orbis/eboot.bin
+dist/pkg_orbis/sce_sys/param.sfo
+dist/pkg_orbis/*.gp4
+dist/pkg_orbis/*.pkg
+*.oelf
 /wiiu-devel.properties
 
 # 3ds
@@ -185,3 +195,29 @@ gfx/common/wayland/xdg-decoration-unstable-v1.h
 gfx/common/wayland/xdg-decoration-unstable-v1.c
 gfx/common/wayland/xdg-shell.c
 gfx/common/wayland/xdg-shell.h
+
+# Non-PS4 platform packaging (dead weight for this fork)
+dist/pkg/360/
+dist/pkg/android/
+dist/pkg/apple/
+dist/pkg/ctr/
+dist/pkg/debian/
+dist/pkg/emscripten/
+dist/pkg/libnx/
+dist/pkg/msvc/
+dist/pkg/msvc-uwp/
+dist/pkg/ngc/
+dist/pkg/pandora/
+dist/pkg/ps3/
+dist/pkg/ps3_dex/
+dist/pkg/ps3_iso/
+dist/pkg/psp1/
+dist/pkg/qnx/
+dist/pkg/sailfishos/
+dist/pkg/vita/
+dist/pkg/wii/
+dist/pkg/wiiu/
+
+# Non-PS4 deps (dead weight for this fork)
+deps/SPIRV-Cross/reference/
+gfx/include/userland/

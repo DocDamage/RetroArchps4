@@ -14,6 +14,8 @@
  * If not, see <http://www.gnu.org/licenses/>.
  */
 
+/* Phase 2 hardening: init, memory stats, cpu name, exec path, drive list */
+
 #include <stdint.h>
 #include <stddef.h>
 #include <string.h>
@@ -25,20 +27,21 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include <kernel.h>
-#include <systemservice.h>
-#include <orbis2d.h>
-#include <orbisPad.h>
-#include <orbisAudio.h>
-#include <modplayer.h>
+#include <libkernel.h>
+#include <SystemService.h>
 #ifdef HAVE_PS4LINK
 #include <ps4link.h>
 #endif
-#include <orbisKeyboard.h>
 #ifdef HAVE_DEBUGNET
 #include <debugnet.h>
 #endif
 #include <orbisFile.h>
+#include <sys/stat.h>
+
+typedef struct Orbis2dConfig Orbis2dConfig;
+typedef struct OrbisPadConfig OrbisPadConfig;
+typedef struct OrbisAudioConfig OrbisAudioConfig;
+typedef struct OrbisKeyboardConfig OrbisKeyboardConfig;
 
 #include <pthread.h>
 
@@ -53,6 +56,7 @@
 #include "../../menu/menu_driver.h"
 #endif
 
+#include "../frontend.h"
 #include "../frontend_driver.h"
 #include "../../defaults.h"
 #include "../../file_path_special.h"
@@ -63,6 +67,10 @@
 typedef struct OrbisGlobalConf
 {
 	Orbis2dConfig *conf;
+	/* confPad: reserved ABI field.  Pad lifecycle is owned by
+	 * ps4_joypad_init()/destroy() — this field is never read by
+	 * RetroArch.  Do NOT remove: external PS4 loaders that hand us
+	 * an OrbisGlobalConf pointer expect this field at this offset. */
 	OrbisPadConfig *confPad;
 	OrbisAudioConfig *confAudio;
 	OrbisKeyboardConfig *confKeyboard;
@@ -82,6 +90,15 @@ char user_path[512];
 
 static enum frontend_fork orbis_fork_mode = FRONTEND_FORK_NONE;
 
+/* --- Orbis argv contract ---
+ * argv[0]  — executable path (standard)
+ * argv[1]  — pointer to OrbisGlobalConf (as a hex string "%p"), passed by
+ *            external PS4 loaders that pre-initialise subsystems.  Consumed
+ *            and then NULLed after parsing so downstream code does not
+ *            attempt to re-interpret it.
+ * argv[2]  — (optional) content path for auto-start; consumed by
+ *            frontend_orbis_get_environment_settings.
+ */
 static void frontend_orbis_attach_runtime_conf(int argc, char *argv[])
 {
 	uintptr_t intptr = 0;
@@ -104,15 +121,6 @@ static void frontend_orbis_attach_runtime_conf(int argc, char *argv[])
 			ps4LinkFinish();
 	}
 #endif
-}
-
-#ifdef __cplusplus
-extern "C"
-#endif
-int main(int argc, char *argv[])
-{
-   sceSystemServiceHideSplashScreen();
-   return rarch_main(argc, argv, NULL);
 }
 
 static void frontend_orbis_get_environment_settings(int *argc, char *argv[],
@@ -140,11 +148,7 @@ static void frontend_orbis_get_environment_settings(int *argc, char *argv[],
 
    orbisFileInit();
 
-   if (myConf && myConf->confPad)
-   {
-      orbisPadInitWithConf(myConf->confPad);
-      scePadClose(myConf->confPad->padHandle);
-   }
+   /* Pad lifecycle is owned by ps4_joypad_init()/destroy(). */
 
    strlcpy(eboot_path, "host0:app", sizeof(eboot_path));
    strlcpy(g_defaults.dirs[DEFAULT_DIR_PORT], eboot_path, sizeof(g_defaults.dirs[DEFAULT_DIR_PORT]));
@@ -275,9 +279,76 @@ static void frontend_orbis_shutdown(bool unused)
    return;
 }
 
+static uint64_t frontend_orbis_get_mem_total(void)
+{
+   /* sceKernelGetDirectMemorySize is available on OpenOrbis.
+    * Falls back to a conservative constant if the call is
+    * not available at link time. */
+#if defined(HAVE_ORBIS_KERNEL_MEM)
+   return (uint64_t)sceKernelGetDirectMemorySize();
+#else
+   /* PS4 has 8 GB of unified memory; ~5 GB accessible to userland. */
+   return (uint64_t)5 * 1024 * 1024 * 1024;
+#endif
+}
+
+static uint64_t frontend_orbis_get_mem_used(void)
+{
+   /* Orbis OS is FreeBSD-based; /proc/self/statm is available on
+    * jailbreak kernels that expose procfs.  Field layout (pages):
+    *   size  resident  shared  text  lib  data  dt
+    * We return resident * PAGE_SIZE.  Falls back to 0 gracefully
+    * when procfs is not mounted (retail/stripped kernels). */
+   FILE    *f = fopen("/proc/self/statm", "r");
+   if (f)
+   {
+      unsigned long virt_pages, rss_pages;
+      if (fscanf(f, "%lu %lu", &virt_pages, &rss_pages) == 2)
+      {
+         fclose(f);
+         return (uint64_t)rss_pages * 4096ULL;
+      }
+      fclose(f);
+   }
+   /* /proc/self/statm is not available — retail firmware or procfs not
+    * mounted.  Log once so developers know the OSD "0 MB" reading is not
+    * a real value.  A proper fix needs sceKernelGetProcessMemoryUsage()
+    * or a kernel-specific call; deferred until on-device testing. */
+   {
+      static bool warned = false;
+      if (!warned)
+      {
+         RARCH_WARN("[ORBIS] /proc/self/statm unavailable — memory stats disabled.\n");
+         warned = true;
+      }
+   }
+   return 0;
+}
+
+static const char *frontend_orbis_get_cpu_model_name(void)
+{
+   /* All retail PS4 models use AMD Jaguar x86-64 cores. */
+   return "AMD Jaguar x86-64 (PS4)";
+}
+
 static void frontend_orbis_init(void *data)
 {
+   /* If no OrbisGlobalConf was passed from the loader (myConf is
+    * still NULL after attach_runtime_conf), boot subsystems here. */
 
+   if (!myConf)
+   {
+      /* The loader did not hand us pre-initialised subsystems.
+       * Perform a standalone init of the pad subsystem so that
+       * ps4_joypad can call scePadOpen later. */
+      orbisFileInit();
+   }
+
+   /* Nothing else to do here: orbisPad, orbisAudio, and
+    * orbis2d are all initialised lazily by their respective
+    * drivers (ps4_joypad_init, orbis_audio_init, orbis_ctx_init).
+    * Keeping this function minimal avoids double-init when the
+    * loader already set up OrbisGlobalConf. */
 }
 
 static void frontend_orbis_exec(const char *path, bool should_load_game)
@@ -295,10 +366,27 @@ static void frontend_orbis_exec(const char *path, bool should_load_game)
 #endif
 
    RARCH_LOG("Attempt to load executable: [%s].\n", path);
-   RARCH_LOG("Attempt to load executable: %d [%s].\n", args, argp);
-   //int ret =  sceAppMgrLoadExec(path, args==0? NULL : (char * const*)((const char*[]){argp, 0}), NULL);
-   //RARCH_LOG("Attempt to load executable: [%d].\n", ret);
+   RARCH_LOG("Attempt to load executable args=%d [%s].\n", args, argp);
 
+#if defined(HAVE_ORBIS_APPEXEC)
+   {
+      /* sceAppMgrLoadExec is available when linking against
+       * the appropriate stub library. Enable by setting
+       * HAVE_ORBIS_APPEXEC=1 in your build environment. */
+      const char *argv[3] = {path, NULL, NULL};
+      if (args > 0)
+         argv[1] = argp;
+
+      int ret = sceAppMgrLoadExec(path, (char * const*)argv, NULL);
+      RARCH_LOG("sceAppMgrLoadExec returned: 0x%08X\n", ret);
+      if (ret != 0)
+         RARCH_ERR("sceAppMgrLoadExec failed (0x%08X) for path: %s\n", ret, path);
+   }
+#else
+   RARCH_WARN("frontend_orbis_exec: HAVE_ORBIS_APPEXEC not set, exec is a no-op.\n");
+   (void)args;
+   (void)argp;
+#endif
 }
 
 #ifndef IS_SALAMANDER
@@ -359,6 +447,17 @@ enum frontend_architecture frontend_orbis_get_architecture(void)
    return FRONTEND_ARCH_X86_64;
 }
 
+/* Returns true if path exists and is accessible.  Used to suppress
+ * removable mounts (/usb0, /usb1) from the drive list when they are
+ * not present.  Note: stat() confirms the path exists in the VFS; it
+ * does not distinguish between an empty mount point and a mounted
+ * volume — on-device testing is needed to verify this behaviour. */
+static bool orbis_path_accessible(const char *path)
+{
+   struct stat st;
+   return stat(path, &st) == 0;
+}
+
 static int frontend_orbis_parse_drive_list(void *data, bool load_content)
 {
 #ifndef IS_SALAMANDER
@@ -379,6 +478,33 @@ static int frontend_orbis_parse_drive_list(void *data, bool load_content)
          FILE_TYPE_DIRECTORY, 0, 0);
    menu_entries_append_enum(list,
          "host0:app/data/retroarch",
+         msg_hash_to_str(MENU_ENUM_LABEL_FILE_DETECT_CORE_LIST_PUSH_DIR),
+         enum_idx,
+         FILE_TYPE_DIRECTORY, 0, 0);
+   menu_entries_append_enum(list,
+         "/",
+         msg_hash_to_str(MENU_ENUM_LABEL_FILE_DETECT_CORE_LIST_PUSH_DIR),
+         enum_idx,
+         FILE_TYPE_DIRECTORY, 0, 0);
+   menu_entries_append_enum(list,
+         "/data",
+         msg_hash_to_str(MENU_ENUM_LABEL_FILE_DETECT_CORE_LIST_PUSH_DIR),
+         enum_idx,
+         FILE_TYPE_DIRECTORY, 0, 0);
+   if (orbis_path_accessible("/usb0"))
+      menu_entries_append_enum(list,
+            "/usb0",
+            msg_hash_to_str(MENU_ENUM_LABEL_FILE_DETECT_CORE_LIST_PUSH_DIR),
+            enum_idx,
+            FILE_TYPE_DIRECTORY, 0, 0);
+   if (orbis_path_accessible("/usb1"))
+      menu_entries_append_enum(list,
+            "/usb1",
+            msg_hash_to_str(MENU_ENUM_LABEL_FILE_DETECT_CORE_LIST_PUSH_DIR),
+            enum_idx,
+            FILE_TYPE_DIRECTORY, 0, 0);
+   menu_entries_append_enum(list,
+         "/data/self",
          msg_hash_to_str(MENU_ENUM_LABEL_FILE_DETECT_CORE_LIST_PUSH_DIR),
          enum_idx,
          FILE_TYPE_DIRECTORY, 0, 0);
@@ -407,8 +533,8 @@ frontend_ctx_driver_t frontend_ctx_orbis = {
    frontend_orbis_get_architecture,
    NULL,
    frontend_orbis_parse_drive_list,
-   NULL,                         /* get_mem_total */
-   NULL,                         /* get_mem_free */
+   frontend_orbis_get_mem_total, /* get_mem_total */
+   frontend_orbis_get_mem_used,  /* get_mem_free  */
    NULL,                         /* install_signal_handler */
    NULL,                         /* get_sighandler_state */
    NULL,                         /* set_sighandler_state */
@@ -418,7 +544,7 @@ frontend_ctx_driver_t frontend_ctx_orbis = {
    NULL,                         /* watch_path_for_changes */
    NULL,                         /* check_for_path_changes */
    NULL,                         /* set_sustained_performance_mode */
-   NULL,                         /* get_cpu_model_name */
+   frontend_orbis_get_cpu_model_name,
    NULL,                         /* get_user_language */
    "orbis",
 };

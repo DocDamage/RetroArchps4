@@ -58,15 +58,23 @@
 #define NO_UNALIGNED_MEM
 #endif
 
-#if __SSE2__
+#if defined(__SSE2__) && __SSE2__
+#if defined(__has_include)
+#if __has_include(<emmintrin.h>)
 #include <emmintrin.h>
+#define HAVE_STATE_MANAGER_SSE2 1
+#endif
+#else
+#include <emmintrin.h>
+#define HAVE_STATE_MANAGER_SSE2 1
+#endif
 #endif
 
 /* There's no equivalent in libc, you'd think so ...
  * std::mismatch exists, but it's not optimized at all. */
 static size_t find_change(const uint16_t *a, const uint16_t *b)
 {
-#if __SSE2__
+#if defined(HAVE_STATE_MANAGER_SSE2)
    const __m128i *a128 = (const __m128i*)a;
    const __m128i *b128 = (const __m128i*)b;
 

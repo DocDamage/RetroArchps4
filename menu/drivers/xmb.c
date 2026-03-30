@@ -21,6 +21,9 @@
 #include <stdint.h>
 #include <string.h>
 #include <limits.h>
+#ifdef ORBIS
+#include <unistd.h>
+#endif
 
 #include <file/file_path.h>
 #include <compat/posix_string.h>
@@ -62,7 +65,7 @@
 
 #include "../../tasks/tasks_internal.h"
 
-#include "../../cheevos-new/badges.h"
+#include "../../cheevos/badges.h"
 #include "../../content.h"
 
 #define XMB_RIBBON_ROWS 64

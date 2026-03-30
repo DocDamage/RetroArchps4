@@ -129,8 +129,8 @@
 #include "input/input_remapping.h"
 
 #ifdef HAVE_CHEEVOS
-#include "cheevos-new/cheevos.h"
-#include "cheevos-new/fixup.h"
+#include "cheevos/cheevos.h"
+#include "cheevos/fixup.h"
 #endif
 
 #ifdef HAVE_TRANSLATE
@@ -301,8 +301,11 @@ static const audio_driver_t *audio_drivers[] = {
 #ifdef EMSCRIPTEN
    &audio_rwebaudio,
 #endif
-#if defined(PSP) || defined(VITA) || defined(ORBIS)
+#if defined(PSP) || defined(VITA)
   &audio_psp,
+#endif
+#if defined(ORBIS)
+  &audio_orbis,
 #endif
 #if defined(PS2)
   &audio_ps2,

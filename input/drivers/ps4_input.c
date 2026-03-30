@@ -29,8 +29,10 @@
 
 #include "../input_driver.h"
 
-/* TODO/FIXME -
- * fix game focus toggle */
+/* Game-focus toggle is not applicable on PS4: the app always owns
+ * the input hardware — there is no competing window manager to yield
+ * to.  The grab_stdin slot is intentionally NULL in the driver vtable
+ * and ps4_input_grab_mouse is a no-op. */
 
 typedef struct ps4_input
 {

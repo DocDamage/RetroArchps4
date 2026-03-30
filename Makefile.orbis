@@ -8,8 +8,12 @@ ORBIS_ENABLE_PS4LINK       ?= 1
 ORBIS_ENABLE_DEBUGNET      ?= 1
 ORBIS_ENABLE_MENU_WIDGETS  ?= 1
 ORBIS_ENABLE_7ZIP          ?= 1
-ORBIS_ENABLE_CHEEVOS       ?= 1
+ORBIS_ENABLE_CHEEVOS       ?= 0
 ORBIS_ENABLE_OVERLAY       ?= 1
+ORBIS_ENABLE_KEYBOARD      ?= 0
+ORBIS_ENABLE_MOUSE         ?= 0
+ORBIS_ENABLE_AUDIO         ?= 1
+ORBIS_ENABLE_APPEXEC       ?= 0
 ORBIS_MENU_DRIVER          ?= xmb
 
 ifeq ($(ORBIS_BUILD_PROFILE),lite)
@@ -19,6 +23,8 @@ ORBIS_ENABLE_MENU_WIDGETS := 0
 ORBIS_ENABLE_7ZIP         := 0
 ORBIS_ENABLE_CHEEVOS      := 0
 ORBIS_ENABLE_OVERLAY      := 0
+ORBIS_ENABLE_AUDIO        := 0
+ORBIS_ENABLE_APPEXEC      := 0
 ORBIS_MENU_DRIVER         := rgui
 DEBUG                     := 0
 else ifeq ($(ORBIS_BUILD_PROFILE),full)
@@ -65,9 +71,14 @@ endif
 
 ifeq ($(strip $(ORBISDEV)),)
 ifeq ($(strip $(PS4SDK)),)
-$(error "Please set ORBISDEV or PS4SDK in your environment.")
+ifneq ($(strip $(OO_PS4_TOOLCHAIN)),)
+ORBISDEV := $(OO_PS4_TOOLCHAIN)
+else
+$(error "Please set ORBISDEV, PS4SDK, or OO_PS4_TOOLCHAIN in your environment.")
 endif
+else
 ORBISDEV := $(PS4SDK)
+endif
 endif
 
 ifneq ($(wildcard $(ORBISDEV)/usr/include),)
@@ -92,15 +103,46 @@ else
 ORBIS_PLATFORM_INCLUDE_ROOT := $(ORBIS_INCLUDE_ROOT)
 endif
 
+ifneq ($(wildcard $(ORBIS_INCLUDE_ROOT)/c++/v1),)
+ORBIS_CXX_INCLUDE_ROOT := $(ORBIS_INCLUDE_ROOT)/c++/v1
+else ifneq ($(wildcard $(ORBISDEV)/usr/include/c++/v1),)
+ORBIS_CXX_INCLUDE_ROOT := $(ORBISDEV)/usr/include/c++/v1
+endif
+
 ifneq ($(wildcard $(ORBIS_LIB_ROOT)/crt0.o),)
 CRTFILE ?= $(ORBIS_LIB_ROOT)/crt0.o
+else ifneq ($(wildcard $(ORBIS_LIB_ROOT)/crt1.o),)
+CRTFILE ?= $(ORBIS_LIB_ROOT)/crt1.o
 else ifneq ($(wildcard $(ORBISDEV)/crt0.s),)
 CRTFILE ?= $(ORBISDEV)/crt0.s
 else
 CRTFILE ?= $(ORBIS_LIB_ROOT)/crt0.o
 endif
 
+ifneq ($(wildcard $(ORBISDEV)/link.x),)
+ORBIS_LINKER_SCRIPT := $(ORBISDEV)/link.x
+else ifneq ($(wildcard $(ORBIS_LIB_ROOT)/linker.x),)
+ORBIS_LINKER_SCRIPT := $(ORBIS_LIB_ROOT)/linker.x
+endif
+
+OO_PS4_TOOLCHAIN ?= $(ORBISDEV)
+export OO_PS4_TOOLCHAIN
 export PATH := $(PATH):$(ORBISDEV)/bin
+
+NULL_DEVICE := /dev/null
+ifeq ($(OS),Windows_NT)
+NULL_DEVICE := NUL
+endif
+
+ifeq ($(OS),Windows_NT)
+define MKDIR_IF_NEEDED
+if not exist "$(subst /,\,$1)" mkdir "$(subst /,\,$1)"
+endef
+else
+define MKDIR_IF_NEEDED
+mkdir -p "$1"
+endef
+endif
 
 PREFIX :=
 
@@ -111,30 +153,44 @@ AR      := $(PREFIX)ar
 OBJCOPY := $(PREFIX)objcopy
 STRIP   := $(PREFIX)strip
 NM      := $(PREFIX)nm
-LD      := $(CXX)
+LD      := $(PREFIX)ld.lld
 
-INCDIRS := -I. -Ideps/libz -Ideps/7zip -Ilibretro-common/include -Ideps/stb -Ilibretro-common/include/compat/zlib
+CLANG_RESOURCE_DIR := $(shell $(CC) -print-resource-dir 2>$(NULL_DEVICE))
+
+INCDIRS := -I. -Icore -Ideps -Ideps/libz -Ideps/7zip -Ilibretro-common/include -Ideps/stb -Ilibretro-common/include/compat/zlib
+ifneq ($(strip $(ORBIS_CXX_INCLUDE_ROOT)),)
+INCDIRS += -I$(ORBIS_CXX_INCLUDE_ROOT)
+endif
 LIBDIRS := -L.
 
-ARCHFLAGS := -m64 -DORBIS
+ARCHFLAGS := -m64 -DORBIS -D__ORBIS__ -D__PS4__ -D_BSD_SOURCE
 CFLAGS    += $(ARCHFLAGS) -std=c11 -mcmodel=large -ffreestanding -nostdlib -nostdinc -fno-builtin -fno-stack-protector -ffunction-sections -fdata-sections
 
 ifeq ($(DEBUG), 1)
    CFLAGS += -O2 -g
 else
-   CFLAGS += -O3
+   CFLAGS += -O3 -DNDEBUG -fomit-frame-pointer
 endif
 
 ASFLAGS := $(ARCHFLAGS) -I$(ORBIS_INCLUDE_ROOT) -target x86_64-scei-ps4-elf -fPIE
-LDFLAGS := -O3 -Wall -m64 -nostartfiles -nostdlib -L$(ORBIS_LIB_ROOT) -pie -Wl,--gc-sections
+LDFLAGS := -m elf_x86_64 -pie -L$(ORBIS_LIB_ROOT) --eh-frame-hdr --gc-sections
+ifneq ($(strip $(ORBIS_LINKER_SCRIPT)),)
+LDFLAGS += --script $(ORBIS_LINKER_SCRIPT)
+endif
 ARFLAGS := rcs
+STRIP_FLAGS ?= --strip-unneeded
 
 CFLAGS += -Wall -pedantic -Wno-zero-length-array -Wno-format-pedantic
-CFLAGS += -D__PS4__ -I$(ORBIS_INCLUDE_ROOT) -I$(ORBIS_PLATFORM_INCLUDE_ROOT)
+CFLAGS += -Ilibretro-common/include/compat/zlib -Ideps/libz
+CFLAGS += -I$(ORBIS_INCLUDE_ROOT) -I$(ORBIS_PLATFORM_INCLUDE_ROOT)
+ifneq ($(strip $(CLANG_RESOURCE_DIR)),)
+CFLAGS += -isystem "$(CLANG_RESOURCE_DIR)/include"
+endif
 CFLAGS += -target x86_64-scei-ps4-elf -fPIE
 CFLAGS += -DRARCH_INTERNAL -DRARCH_CONSOLE
 CFLAGS += -DHAVE_FILTERS_BUILTIN $(DEFINES)
-CFLAGS += -DORBIS_BUILD_PROFILE='\"$(ORBIS_BUILD_PROFILE)\"'
+CFLAGS += -DORBIS_BUILD_PROFILE=\"$(ORBIS_BUILD_PROFILE)\"
+CFLAGS += -DWANT_ZLIB
 
 ifeq ($(ORBIS_BUILD_PROFILE),lite)
    CFLAGS += -DORBIS_LITE_BUILD
@@ -183,7 +239,12 @@ else
 	HAVE_THREADS		:= 1
 	HAVE_LIBRETRODB		:= 1
 	HAVE_CC_RESAMPLER	:= 1
-	HAVE_CHEEVOS		:= $(ORBIS_ENABLE_CHEEVOS)
+ifeq ($(ORBIS_ENABLE_CHEEVOS),1)
+    $(warning ORBIS_ENABLE_CHEEVOS=1 has no effect: cheevos require HAVE_NETWORKING=1 which is not available on Orbis yet.)
+    HAVE_CHEEVOS		:= 0
+else
+    HAVE_CHEEVOS		:= $(ORBIS_ENABLE_CHEEVOS)
+endif
 	RARCH_CONSOLE		:= 1
 	HAVE_STATIC_VIDEO_FILTERS = 1
 	HAVE_STATIC_AUDIO_FILTERS = 1
@@ -192,10 +253,16 @@ else
 		HAVE_NETLOGGER = 1
 	endif
 
-	include Makefile.common
+	include dist/makefiles/Makefile.common
+	ifeq ($(HAVE_ZLIB),1)
+		OBJ += $(patsubst %.c,%.o,$(wildcard deps/libz/*.c))
+	endif
 	CFLAGS += $(DEF_FLAGS)
 	BLACKLIST :=
 	OBJ := $(filter-out $(BLACKLIST),$(OBJ))
+	ifeq ($(filter version_git.o,$(OBJ)),)
+		OBJ += version_git.o
+	endif
 endif
 
 ifneq ($(PC_DEVELOPMENT_IP_ADDRESS),)
@@ -212,22 +279,46 @@ ifeq ($(WHOLE_ARCHIVE_LINK), 1)
 endif
 CXXFLAGS := $(CFLAGS)
 
-PS4_LIBS := -lorbisFile -lelfloader -lorbisKeyboard -lorbis2d -lpng -lz -lorbisGl -lorbisPad -lorbisAudio -lmod -lorbisFileBrowser -lorbisXbmFont -lSceNet_stub -lScePigletv2VSH_stub -lSceSystemService_stub -lSceUserService_stub -lScePad_stub -lSceAudioOut_stub -lSceIme_stub -lSceSysmodule_stub \
-	-lPs4_extension_kernel_call_standard -lPs4_extension_kernel_execute_dynlib_prepare_dlclose -lPs4_common_kernel -lPs4_common_user -lPs4_common_generic -lPs4LibCInternalAdaptive_stub -lPs4LibKernelAdaptive_stub -lSceLibcInternal_stub -lkernel_stub -lps4Kernel_stub -lPs4_base_stub_resolve_minimal -lPs4_base_kernel_dlsym_standard -lPs4_base_kernel_seek_elf_address_standard -lPs4_base_assembler_register_parameter_standard -lPs4_base_assembler_system_call_standard
+PS4_LIBS := -lScePigletv2VSH -lSceSystemService -lSceUserService -lScePad \
+	-lkernel -lc -lm -lpthread
+# ↑ Core libs — required by all profiles (lite, full, dev).
+# Piglet = GLES2 via EGL.  SceSystemService = splash screen, app lifecycle.
+# SceUserService + ScePad = controller/user enumeration.
+# kernel/c/m/pthread = FreeBSD userland basics.
+
+ifeq ($(ORBIS_ENABLE_KEYBOARD),1)
+   CFLAGS += -DHAVE_KEYBOARD
+   PS4_LIBS += -lSceDbgKeyboard_stub  # Optional: experimental keyboard (off by default)
+endif
+
+ifeq ($(ORBIS_ENABLE_MOUSE),1)
+   CFLAGS += -DHAVE_MOUSE
+   PS4_LIBS += -lSceMouse_stub        # Optional: experimental mouse (off by default)
+endif
+
+ifeq ($(ORBIS_ENABLE_AUDIO),1)
+   CFLAGS  += -DHAVE_ORBIS_AUDIO
+   PS4_LIBS += -lorbisAudio            # Optional: full/dev only — requires external lib (see docs)
+endif
+
+ifeq ($(ORBIS_ENABLE_APPEXEC),1)
+   CFLAGS += -DHAVE_ORBIS_APPEXEC
+endif
 
 ifeq ($(ORBIS_ENABLE_PS4LINK),1)
    CFLAGS += -DHAVE_PS4LINK
-   PS4_LIBS += -lps4link
+   PS4_LIBS += -lps4link               # Optional: dev only — PS4Link transport
 endif
 
 ifeq ($(ORBIS_ENABLE_DEBUGNET),1)
    CFLAGS += -DHAVE_DEBUGNET
-   PS4_LIBS += -ldebugnet
+   PS4_LIBS += -ldebugnet              # Optional: dev only — UDP debug logging
 endif
 
-LIBS	:= $(WHOLE_START) -lretro_orbis $(WHOLE_END) $(PS4_LIBS)
+LIBS	:= $(WHOLE_START) $(WHOLE_END) $(PS4_LIBS)
 
 TARGETS := $(TARGET).elf
+STRIPPED_TARGET := $(TARGET).stripped.elf
 
 DEPFLAGS    = -MT $@ -MMD -MP -MF $*.Tdepend
 POSTCOMPILE = mv -f $*.Tdepend $*.depend
@@ -237,29 +328,50 @@ POSTCOMPILE = mv -f $*.Tdepend $*.depend
 all: $(TARGETS)
 
 dev:
-	$(MAKE) --no-print-directory all ORBIS_BUILD_PROFILE=dev
+	$(MAKE) --no-print-directory -f Makefile.orbis all ORBIS_BUILD_PROFILE=dev
 
 full:
-	$(MAKE) --no-print-directory all ORBIS_BUILD_PROFILE=full
+	$(MAKE) --no-print-directory -f Makefile.orbis all ORBIS_BUILD_PROFILE=full
 
 lite:
-	$(MAKE) --no-print-directory all ORBIS_BUILD_PROFILE=lite
+	$(MAKE) --no-print-directory -f Makefile.orbis all ORBIS_BUILD_PROFILE=lite
+
+stripped: $(STRIPPED_TARGET)
+
+full-stripped:
+	$(MAKE) --no-print-directory -f Makefile.orbis stripped ORBIS_BUILD_PROFILE=full
+
+lite-stripped:
+	$(MAKE) --no-print-directory -f Makefile.orbis stripped ORBIS_BUILD_PROFILE=lite
 
 help:
 	@echo "Orbis build profiles:"
-	@echo "  make -f Makefile.orbis dev   # debug-oriented build with ps4link/debugnet"
-	@echo "  make -f Makefile.orbis full  # release build with current feature set"
-	@echo "  make -f Makefile.orbis lite  # lean release build with rgui and optional extras off"
+	@echo "  make -f Makefile.orbis dev            # debug-oriented build with ps4link/debugnet"
+	@echo "  make -f Makefile.orbis full           # release build with current feature set"
+	@echo "  make -f Makefile.orbis lite           # lean release build with rgui and optional extras off"
+	@echo "  make -f Makefile.orbis full-stripped  # stripped full release artifact"
+	@echo "  make -f Makefile.orbis lite-stripped  # stripped lean release artifact"
 	@echo ""
-	@echo "Override knobs: ORBIS_ENABLE_PS4LINK, ORBIS_ENABLE_DEBUGNET, ORBIS_ENABLE_MENU_WIDGETS, ORBIS_ENABLE_7ZIP, ORBIS_ENABLE_CHEEVOS, ORBIS_ENABLE_OVERLAY, ORBIS_MENU_DRIVER"
+	@echo "Override knobs: ORBIS_ENABLE_PS4LINK, ORBIS_ENABLE_DEBUGNET, ORBIS_ENABLE_MENU_WIDGETS, ORBIS_ENABLE_7ZIP, ORBIS_ENABLE_CHEEVOS, ORBIS_ENABLE_OVERLAY, ORBIS_ENABLE_KEYBOARD, ORBIS_ENABLE_MOUSE, ORBIS_MENU_DRIVER"
+	@echo ""
+	@echo "PKG packaging (requires OpenOrbis create-fself / create-pkg on PATH or in ORBISDEV/bin):"
+	@echo "  make -f Makefile.orbis pkg          # package current profile into .pkg"
+	@echo "  make -f Makefile.orbis pkg-full     # package full profile"
+	@echo "  make -f Makefile.orbis pkg-lite     # package lite profile"
+	@echo "  make -f Makefile.orbis fself        # wrap ELF into eboot.bin only"
+	@echo "  make -f Makefile.orbis sfo          # generate param.sfo only"
+	@echo "  PKG_TITLE_ID=XXXX00001 make pkg     # override title ID"
 
 info:
 	@echo "ORBIS_BUILD_PROFILE=$(ORBIS_BUILD_PROFILE)"
 	@echo "ORBIS_TOOLCHAIN_LAYOUT=$(ORBIS_TOOLCHAIN_LAYOUT)"
 	@echo "ORBIS_INCLUDE_ROOT=$(ORBIS_INCLUDE_ROOT)"
 	@echo "ORBIS_PLATFORM_INCLUDE_ROOT=$(ORBIS_PLATFORM_INCLUDE_ROOT)"
+	@echo "ORBIS_CXX_INCLUDE_ROOT=$(ORBIS_CXX_INCLUDE_ROOT)"
 	@echo "ORBIS_LIB_ROOT=$(ORBIS_LIB_ROOT)"
+	@echo "ORBIS_LINKER_SCRIPT=$(ORBIS_LINKER_SCRIPT)"
 	@echo "CRTFILE=$(CRTFILE)"
+	@echo "STRIP_FLAGS=$(STRIP_FLAGS)"
 	@echo "DEBUG=$(DEBUG)"
 	@echo "ORBIS_MENU_DRIVER=$(ORBIS_MENU_DRIVER)"
 	@echo "ORBIS_ENABLE_PS4LINK=$(ORBIS_ENABLE_PS4LINK)"
@@ -268,6 +380,11 @@ info:
 	@echo "ORBIS_ENABLE_7ZIP=$(ORBIS_ENABLE_7ZIP)"
 	@echo "ORBIS_ENABLE_CHEEVOS=$(ORBIS_ENABLE_CHEEVOS)"
 	@echo "ORBIS_ENABLE_OVERLAY=$(ORBIS_ENABLE_OVERLAY)"
+	@echo "ORBIS_ENABLE_KEYBOARD=$(ORBIS_ENABLE_KEYBOARD)"
+	@echo "ORBIS_ENABLE_MOUSE=$(ORBIS_ENABLE_MOUSE)"
+
+size:
+	@ls -lh $(TARGET).elf $(STRIPPED_TARGET) 2>/dev/null || ls -lh $(TARGET).elf 2>/dev/null || true
 
 %.o: %.cpp
 %.o: %.cpp %.depend
@@ -291,14 +408,117 @@ info:
 
 %.depend: ;
 
-$(TARGET).elf: $(OBJ) libretro_orbis.a
-	$(LD) $(CRTFILE) $(OBJ) $(LDFLAGS) $(LIBDIRS) $(LIBS) -o $@
+$(TARGET).elf: $(OBJ)
+	$(LD) $(LDFLAGS) -o $@ $(CRTFILE) $(OBJ) $(LIBDIRS) $(LIBS)
+
+$(STRIPPED_TARGET): $(TARGET).elf
+	cp $< $@
+	$(STRIP) $(STRIP_FLAGS) $@
+
+# ─── PS4 PKG packaging ───────────────────────────────────────────────────────
+# Requires the OpenOrbis toolchain to provide create-fself and create-pkg.
+# Tools are looked up on PATH first, then under $(ORBISDEV)/bin/.
+#
+# Targets:
+#   fself        — wrap the ELF into an eboot.bin fake-self
+#   sfo          — generate dist/pkg/sce_sys/param.sfo
+#   pkg          — build a full .pkg from the current profile
+#   pkg-full     — pkg with ORBIS_BUILD_PROFILE=full
+#   pkg-lite     — pkg with ORBIS_BUILD_PROFILE=lite
+
+PKG_TITLE_ID   ?= $(PS4_TITLE_ID)
+PKG_CONTENT_ID ?= UP0000-$(PKG_TITLE_ID)_00-RETROARCH0000000
+
+PKG_SFO_SCRIPT := dist/pkg/make_sfo.py
+PKG_DIR     := dist/pkg_orbis
+PKG_SCE_SYS := $(PKG_DIR)/sce_sys
+PKG_EBOOT   := $(PKG_DIR)/eboot.bin
+PKG_SFO     := $(PKG_SCE_SYS)/param.sfo
+PKG_OUT     := $(PKG_CONTENT_ID).pkg
+PKG_OELF    := $(TARGET).oelf
+PKG_GP4     := $(PKG_DIR)/$(PKG_CONTENT_ID).gp4
+
+ifeq ($(OS),Windows_NT)
+CREATE_GP4   ?= $(ORBISDEV)/bin/windows/create-gp4.exe
+PKG_TOOL     ?= $(ORBISDEV)/bin/windows/PkgTool.Core.exe
+CREATE_FSELF ?= $(firstword $(wildcard $(ORBISDEV)/bin/create-fself.cmd $(ORBISDEV)/bin/create-fself.exe $(ORBISDEV)/bin/create-fself))
+CREATE_PKG   ?= $(firstword $(wildcard $(ORBISDEV)/bin/create-pkg.cmd   $(ORBISDEV)/bin/create-pkg.exe   $(ORBISDEV)/bin/create-pkg))
+else
+CREATE_FSELF ?= $(or $(shell command -v create-fself 2>/dev/null),$(ORBISDEV)/bin/create-fself)
+CREATE_PKG   ?= $(or $(shell command -v create-pkg   2>/dev/null),$(ORBISDEV)/bin/create-pkg)
+endif
+
+check-pkg-tools:
+	$(if $(strip $(CREATE_FSELF)),,$(error error: create-fself not found; install OpenOrbis tools or set CREATE_FSELF=<path>))
+	$(if $(strip $(CREATE_PKG)),,$(error error: create-pkg not found; install OpenOrbis tools or set CREATE_PKG=<path>))
+ifeq ($(OS),Windows_NT)
+	$(if $(wildcard $(CREATE_GP4)),,$(error error: create-gp4 not found at $(CREATE_GP4)))
+	$(if $(wildcard $(PKG_TOOL)),,$(error error: PkgTool.Core not found at $(PKG_TOOL)))
+endif
+
+$(PKG_SCE_SYS):
+	$(call MKDIR_IF_NEEDED,$@)
+
+ifeq ($(OS),Windows_NT)
+PKGTOOL_CMD = set "DOTNET_ROLL_FORWARD=Major" && "$(PKG_TOOL)"
+
+$(PKG_SFO): | $(PKG_SCE_SYS)
+	$(PKGTOOL_CMD) sfo_new $@
+	$(PKGTOOL_CMD) sfo_setentry $@ APP_TYPE --type Integer --maxsize 4 --value 1
+	$(PKGTOOL_CMD) sfo_setentry $@ APP_VER --type Utf8 --maxsize 8 --value "1.00"
+	$(PKGTOOL_CMD) sfo_setentry $@ ATTRIBUTE --type Integer --maxsize 4 --value 0
+	$(PKGTOOL_CMD) sfo_setentry $@ CATEGORY --type Utf8 --maxsize 4 --value "gd"
+	$(PKGTOOL_CMD) sfo_setentry $@ CONTENT_ID --type Utf8 --maxsize 48 --value "$(PKG_CONTENT_ID)"
+	$(PKGTOOL_CMD) sfo_setentry $@ DOWNLOAD_DATA_SIZE --type Integer --maxsize 4 --value 0
+	$(PKGTOOL_CMD) sfo_setentry $@ SYSTEM_VER --type Integer --maxsize 4 --value 0
+	$(PKGTOOL_CMD) sfo_setentry $@ TITLE --type Utf8 --maxsize 128 --value "$(PS4_TITLE_NAME)"
+	$(PKGTOOL_CMD) sfo_setentry $@ TITLE_ID --type Utf8 --maxsize 12 --value "$(PKG_TITLE_ID)"
+	$(PKGTOOL_CMD) sfo_setentry $@ VERSION --type Utf8 --maxsize 8 --value "1.00"
+else
+$(PKG_SFO): $(PKG_SFO_SCRIPT) | $(PKG_SCE_SYS)
+	python3 $(PKG_SFO_SCRIPT) --title "$(PS4_TITLE_NAME)" --title-id "$(PKG_TITLE_ID)" -o $@
+endif
+
+$(PKG_EBOOT): $(TARGET).elf | check-pkg-tools
+	$(call MKDIR_IF_NEEDED,$(PKG_DIR))
+	$(CREATE_FSELF) -in=$< --out=$(PKG_OELF) --eboot $@ --paid 0x3800000000000011
+
+fself: $(PKG_EBOOT)
+
+sfo: $(PKG_SFO)
+
+$(PKG_OUT): $(PKG_EBOOT) $(PKG_SFO) | check-pkg-tools
+ifeq ($(OS),Windows_NT)
+	set "DOTNET_ROLL_FORWARD=Major" && "$(CREATE_GP4)" -content-id="$(PKG_CONTENT_ID)" -files "eboot.bin sce_sys/param.sfo" -out "$(PKG_GP4)"
+	set "DOTNET_ROLL_FORWARD=Major" && "$(PKG_TOOL)" pkg_build "$(PKG_GP4)" "."
+else
+	$(CREATE_PKG) --in-dir $(PKG_DIR) --out-dir . --content-id $(PKG_CONTENT_ID)
+endif
+	@echo "PKG ready: $(PKG_OUT)"
+
+pkg: check-pkg-tools $(PKG_OUT)
+
+pkg-full:
+	$(MAKE) --no-print-directory -f Makefile.orbis pkg ORBIS_BUILD_PROFILE=full
+
+pkg-lite:
+	$(MAKE) --no-print-directory -f Makefile.orbis pkg ORBIS_BUILD_PROFILE=lite
 
 clean:
-	rm -f $(OBJ) $(TARGET).elf
+	rm -f $(OBJ) $(TARGET).elf $(STRIPPED_TARGET)
 	rm -f $(OBJ:.o=.depend)
 
-.PHONY: clean all dev full lite help info
+clean-pkg:
+ifeq ($(OS),Windows_NT)
+	if exist "$(subst /,\,$(PKG_DIR))" rmdir /s /q "$(subst /,\,$(PKG_DIR))"
+	if exist "$(subst /,\,$(PKG_OUT))" del /f /q "$(subst /,\,$(PKG_OUT))"
+	if exist "$(subst /,\,$(PKG_OELF))" del /f /q "$(subst /,\,$(PKG_OELF))"
+else
+	rm -rf $(PKG_DIR) $(PKG_OUT) $(PKG_OELF)
+endif
+
+.PHONY: clean clean-pkg all dev full lite stripped full-stripped lite-stripped \
+        fself sfo pkg pkg-full pkg-lite help info size check-pkg-tools
 .PRECIOUS: %.depend
 
 -include $(OBJ:.o=.depend)

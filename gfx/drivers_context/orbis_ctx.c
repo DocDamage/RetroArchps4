@@ -15,8 +15,17 @@
  */
 
 #include <stdlib.h>
+#include <string.h>
 
 #include <compat/strl.h>
+#include <string/stdstring.h>
+
+/* Query the PS4 display output for the actual connected resolution.
+ * Available in OpenOrbis via <videoout.h>; compiled out when absent. */
+#if defined(__has_include) && __has_include(<videoout.h>)
+#include <videoout.h>
+#define ORBIS_HAS_VIDEOOUT 1
+#endif
 
 #ifdef HAVE_CONFIG_H
 #include "../../config.h"
@@ -25,12 +34,15 @@
 #include "../common/orbis_common.h"
 #include "../../frontend/frontend_driver.h"
 #include "../../configuration.h"
+#include "../../input/input_driver.h"
+#include "../../verbosity.h"
 
 static enum gfx_ctx_api ctx_orbis_api = GFX_CTX_OPENGL_API;
 
-orbis_ctx_data_t *nx_ctx_ptr = NULL;
+orbis_ctx_data_t *orbis_ctx_ptr = NULL;
 
-extern bool platform_orbis_has_focus;
+extern input_driver_t input_ps4;
+extern input_device_driver_t ps4_joypad;
 
 void orbis_ctx_destroy(void *data)
 {
@@ -44,15 +56,26 @@ void orbis_ctx_destroy(void *data)
         ctx_orbis->resize = false;
         free(ctx_orbis);
     }
+    orbis_ctx_ptr = NULL;
 }
 
 static void orbis_ctx_get_video_size(void *data,
                                       unsigned *width, unsigned *height)
 {
     orbis_ctx_data_t *ctx_orbis = (orbis_ctx_data_t *)data;
+    unsigned video_width = ATTR_ORBISGL_WIDTH;
+    unsigned video_height = ATTR_ORBISGL_HEIGHT;
 
-    *width = ATTR_ORBISGL_WIDTH;
-    *height = ATTR_ORBISGL_HEIGHT;
+    if (ctx_orbis && ctx_orbis->width && ctx_orbis->height)
+    {
+       video_width  = ctx_orbis->width;
+       video_height = ctx_orbis->height;
+    }
+
+    if (width)
+       *width = video_width;
+    if (height)
+       *height = video_height;
 }
 
 static void *orbis_ctx_init(video_frame_info_t *video_info, void *video_driver)
@@ -75,37 +98,48 @@ static void *orbis_ctx_init(video_frame_info_t *video_info, void *video_driver)
          EGL_NONE};
 #endif
 
+    (void)video_info;
+    (void)video_driver;
+
     orbis_ctx_data_t *ctx_orbis = (orbis_ctx_data_t *)calloc(1, sizeof(*ctx_orbis));
 
     if (!ctx_orbis)
         return NULL;
 
-    nx_ctx_ptr = ctx_orbis;
+    orbis_ctx_ptr = ctx_orbis;
 
 #ifdef HAVE_EGL
 
-   memset(&ctx_orbis->pgl_config, 0, sizeof(ctx_orbis->pgl_config));
+   /* Populate ScePglConfig using named constants from orbis_common.h.
+    * Only call scePigletSetConfigurationVSH once per process — if piglet
+    * was already configured (e.g. by a previous context init attempt)
+    * skip this step to avoid a hard fault. */
+   if (!ctx_orbis->piglet_configured)
    {
-      ctx_orbis->pgl_config.size=sizeof(ctx_orbis->pgl_config);
-      ctx_orbis->pgl_config.flags=SCE_PGL_FLAGS_USE_COMPOSITE_EXT | SCE_PGL_FLAGS_USE_FLEXIBLE_MEMORY | 0x60;
-      ctx_orbis->pgl_config.processOrder=1;
-      ctx_orbis->pgl_config.systemSharedMemorySize=0x200000;
-      ctx_orbis->pgl_config.videoSharedMemorySize=0x2400000;
-      ctx_orbis->pgl_config.maxMappedFlexibleMemory=0xAA00000;
-      ctx_orbis->pgl_config.drawCommandBufferSize=0xC0000;
-      ctx_orbis->pgl_config.lcueResourceBufferSize=0x10000;
-      ctx_orbis->pgl_config.dbgPosCmd_0x40=ATTR_ORBISGL_WIDTH;
-      ctx_orbis->pgl_config.dbgPosCmd_0x44=ATTR_ORBISGL_HEIGHT;
-      ctx_orbis->pgl_config.dbgPosCmd_0x48=0;
-      ctx_orbis->pgl_config.dbgPosCmd_0x4C=0;
-      ctx_orbis->pgl_config.unk_0x5C=2;
+      memset(&ctx_orbis->pgl_config, 0, sizeof(ctx_orbis->pgl_config));
+      ctx_orbis->pgl_config.size                   = sizeof(ctx_orbis->pgl_config);
+      ctx_orbis->pgl_config.flags                  = ORBISGL_PGL_FLAGS;
+      ctx_orbis->pgl_config.processOrder           = 1;
+      ctx_orbis->pgl_config.systemSharedMemorySize = ORBISGL_PGL_SYSTEM_SHARED_MEM;
+      ctx_orbis->pgl_config.videoSharedMemorySize  = ORBISGL_PGL_VIDEO_SHARED_MEM;
+      ctx_orbis->pgl_config.maxMappedFlexibleMemory= ORBISGL_PGL_MAX_FLEXIBLE_MEM;
+      ctx_orbis->pgl_config.drawCommandBufferSize  = ORBISGL_PGL_DRAW_CMD_BUF;
+      ctx_orbis->pgl_config.lcueResourceBufferSize = ORBISGL_PGL_LCUE_RESOURCE_BUF;
+      ctx_orbis->pgl_config.dbgPosCmd_0x40         = ATTR_ORBISGL_WIDTH;
+      ctx_orbis->pgl_config.dbgPosCmd_0x44         = ATTR_ORBISGL_HEIGHT;
+      ctx_orbis->pgl_config.dbgPosCmd_0x48         = 0;
+      ctx_orbis->pgl_config.dbgPosCmd_0x4C         = 0;
+      ctx_orbis->pgl_config.unk_0x5C               = 2;
+
+      ret = scePigletSetConfigurationVSH(&ctx_orbis->pgl_config);
+      if (ret != 0)
+      {
+         printf("[ORBISGL] scePigletSetConfigurationVSH failed 0x%08X.\n", ret);
+         goto error;
+      }
+
+      ctx_orbis->piglet_configured = true;
    }
-    ret = scePigletSetConfigurationVSH(&ctx_orbis->pgl_config);
-    if (!ret)
-    {
-		  printf("[ORBISGL] scePigletSetConfigurationVSH failed 0x%08X.\n",ret);
-        goto error;
-    }
 
     if (!egl_init_context(&ctx_orbis->egl, EGL_NONE, EGL_DEFAULT_DISPLAY,
                           &major, &minor, &n, attribs, NULL))
@@ -116,10 +150,51 @@ static void *orbis_ctx_init(video_frame_info_t *video_info, void *video_driver)
     }
 #endif
 
+#ifdef ORBIS_HAS_VIDEOOUT
+   /* Query the actual display resolution from the video-out hardware so
+    * that set_video_mode uses real dimensions instead of the compile-time
+    * ATTR_ORBISGL_* constants.  Failure is non-fatal: width/height remain
+    * 0 and set_video_mode falls back to the constants. */
+   {
+      int vout = sceVideoOutOpen(
+            0xFF000001 /* SCE_USER_SERVICE_USER_ID_SYSTEM */,
+            0          /* SCE_VIDEO_OUT_BUS_TYPE_MAIN */,
+            0, NULL);
+      if (vout >= 0)
+      {
+         SceVideoOutResolutionStatus res;
+         memset(&res, 0, sizeof(res));
+         if (sceVideoOutGetResolutionStatus(vout, &res) == 0 &&
+              res.fullWidth > 0 && res.fullHeight > 0)
+          {
+             ctx_orbis->width  = res.fullWidth;
+             ctx_orbis->height = res.fullHeight;
+             if (res.refreshRate > 0.0f)
+                ctx_orbis->refresh_rate = res.refreshRate;
+             RARCH_LOG("[ORBIS] Display resolution: %ux%u @ %.2f Hz\n",
+                       ctx_orbis->width, ctx_orbis->height,
+                       ctx_orbis->refresh_rate);
+         }
+         else
+         {
+            RARCH_WARN("[ORBIS] sceVideoOutGetResolutionStatus failed — "
+                       "falling back to %ux%u\n",
+                       ATTR_ORBISGL_WIDTH, ATTR_ORBISGL_HEIGHT);
+         }
+         sceVideoOutClose(vout);
+      }
+      else
+      {
+         RARCH_WARN("[ORBIS] sceVideoOutOpen failed (0x%08X) — "
+                    "display resolution query skipped\n", vout);
+      }
+   }
+#endif
+
     return ctx_orbis;
 
 error:
-    orbis_ctx_destroy(video_driver);
+    orbis_ctx_destroy(ctx_orbis);
     return NULL;
 }
 
@@ -153,13 +228,14 @@ static bool orbis_ctx_set_video_mode(void *data,
 
     orbis_ctx_data_t *ctx_orbis = (orbis_ctx_data_t *)data;
 
-    ctx_orbis->width = ATTR_ORBISGL_WIDTH;
-    ctx_orbis->height = ATTR_ORBISGL_HEIGHT;
+    (void)video_info;
+    (void)fullscreen;
 
-    ctx_orbis->native_window.width = ctx_orbis->width;
-    ctx_orbis->native_window.height = ctx_orbis->height;
+    ctx_orbis->width = width ? width : ATTR_ORBISGL_WIDTH;
+    ctx_orbis->height = height ? height : ATTR_ORBISGL_HEIGHT;
 
-    ctx_orbis->refresh_rate = 60;
+    if (ctx_orbis->refresh_rate <= 0.0f)
+       ctx_orbis->refresh_rate = 60.0f;
 
 #ifdef HAVE_EGL
     if (!egl_create_context(&ctx_orbis->egl, contextAttributeList))
@@ -187,8 +263,21 @@ static void orbis_ctx_input_driver(void *data,
                                     const char *name,
                                     const input_driver_t **input, void **input_data)
 {
-    *input = NULL;
-    *input_data = NULL;
+    /* Wire the PS4 input driver so that cores receive pad events.
+     * ps4_input_initialize calls input_joypad_init_driver which will
+     * pick up &ps4_joypad automatically. */
+    void *ps4_input_handle = input_ps4.init("ps4");
+    if (ps4_input_handle)
+    {
+        *input      = &input_ps4;
+        *input_data = ps4_input_handle;
+    }
+    else
+    {
+        RARCH_WARN("[ORBIS] ps4 input init failed, falling back to null.\n");
+        *input      = NULL;
+        *input_data = NULL;
+    }
 }
 
 static enum gfx_ctx_api orbis_ctx_get_api(void *data)
@@ -228,7 +317,7 @@ static void orbis_ctx_set_swap_interval(void *data,
     orbis_ctx_data_t *ctx_orbis = (orbis_ctx_data_t *)data;
 
 #ifdef HAVE_EGL
-    egl_set_swap_interval(&ctx_orbis->egl, 0);
+    egl_set_swap_interval(&ctx_orbis->egl, swap_interval);
 #endif
 }
 
@@ -246,6 +335,8 @@ static gfx_ctx_proc_t orbis_ctx_get_proc_address(const char *symbol)
 #ifdef HAVE_EGL
     return egl_get_proc_address(symbol);
 #endif
+   (void)symbol;
+   return NULL;
 }
 
 static void orbis_ctx_bind_hw_render(void *data, bool enable)
