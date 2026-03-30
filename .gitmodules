@@ -1,0 +1,3 @@
+[submodule "deps/orbisdev-liborbisAudio"]
+	path = deps/orbisdev-liborbisAudio
+	url = https://github.com/orbisdev/orbisdev-liborbisAudio.git
